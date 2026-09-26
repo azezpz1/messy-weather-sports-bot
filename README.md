@@ -2,12 +2,13 @@
 
 A bot to post messy NFL weather games to various social media sites
 
-On the morning of NFL game days, this bot checks the forecast for every outdoor
-stadium hosting a game that day, ranks them by how messy the weather looks
-(snow first, then by a combined score of wind, precipitation odds, and
-temperature extremes), and posts a weather report — currently to
-[Bluesky](https://bsky.app), with a clean abstraction to add more platforms
-later.
+On the morning of NFL game days, this bot checks the forecast — and any active
+National Weather Service alerts (Winter Storm Warning, Wind Advisory, etc.) —
+for every outdoor stadium hosting a game that day, ranks them by how messy the
+weather looks (snow first, then by a combined score of wind, precipitation
+odds, temperature extremes, and alert severity), and posts a weather report —
+currently to [Bluesky](https://bsky.app), with a clean abstraction to add more
+platforms later.
 
 Games in domed, fixed-roof, or retractable-roof stadiums are skipped, since
 roof status isn't reliably knowable ahead of time. If there are no outdoor

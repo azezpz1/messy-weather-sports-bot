@@ -12,13 +12,14 @@ from collections.abc import Sequence
 import httpx
 
 from messy_weather_nfl_bot import healthcheck, state
+from messy_weather_nfl_bot.alerts import WeatherAlert, get_active_alerts
 from messy_weather_nfl_bot.formatting import build_post_texts, format_kickoff
 from messy_weather_nfl_bot.messiness import GameWeather, evaluate_game, sort_by_messiness
 from messy_weather_nfl_bot.poster import POSTERS
 from messy_weather_nfl_bot.poster.base import PartialThreadError, SocialMediaPoster
 from messy_weather_nfl_bot.poster.console import ConsolePoster
 from messy_weather_nfl_bot.schedule import get_todays_games, skip_reason, todays_local_date
-from messy_weather_nfl_bot.weather import WeatherReport, get_forecast
+from messy_weather_nfl_bot.weather import USER_AGENT, WeatherReport, get_forecast
 
 logger = logging.getLogger("messy_weather_nfl_bot")
 
@@ -169,14 +170,27 @@ def run(platform_names: list[str], dry_run: bool, force: bool = False) -> int:
 
         outdoor_count += 1
         assert game.stadium is not None  # guaranteed by skip_reason() returning None above
-        try:
-            forecasts = get_forecast(game.stadium.latitude, game.stadium.longitude, game.kickoff)
-        except (httpx.HTTPError, ValueError) as exc:
-            games_missing += 1
-            logger.info("%s — skipped: forecast unavailable (%s)", matchup, exc)
-            continue
+        alerts: list[WeatherAlert] = []
+        with httpx.Client(timeout=10.0, headers={"User-Agent": USER_AGENT}) as nws_client:
+            try:
+                forecasts = get_forecast(
+                    game.stadium.latitude, game.stadium.longitude, game.kickoff, nws_client
+                )
+            except (httpx.HTTPError, ValueError) as exc:
+                games_missing += 1
+                logger.info("%s — skipped: forecast unavailable (%s)", matchup, exc)
+                continue
 
-        gw = evaluate_game(game, forecasts)
+            try:
+                alerts = get_active_alerts(
+                    game.stadium.latitude, game.stadium.longitude, game.kickoff, nws_client
+                )
+            except (httpx.HTTPError, ValueError) as exc:
+                # An alert lookup failing shouldn't drop the game - the line just shows
+                # no alert and scoring falls back to the forecast alone.
+                logger.info("%s — no alert data (%s)", matchup, exc)
+
+        gw = evaluate_game(game, forecasts, alerts)
         evaluated.append(gw)
         period_word = "period" if len(forecasts) == 1 else "periods"
         logger.info(

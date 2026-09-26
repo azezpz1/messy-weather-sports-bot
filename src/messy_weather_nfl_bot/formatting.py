@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 
+from messy_weather_nfl_bot.alerts import AlertSeverity
 from messy_weather_nfl_bot.messiness import EMOJI, GameWeather
 from messy_weather_nfl_bot.schedule import GAME_DAY_TIMEZONE
 
@@ -29,14 +30,20 @@ def format_game_line(gw: GameWeather) -> str:
         parts.append(f"{weather.temperature_f}°F")
     if weather.wind_speed_mph > 0:
         parts.append(f"{weather.wind_speed_mph:g}mph wind")
-    return (
+    line = (
         f"\U0001f3c8 {gw.game.away_team} @ {gw.game.home_team} ({kickoff}): "
         f"{emoji} {', '.join(parts)}"
     )
+    if gw.alert is not None:
+        line += f" ⚠️ {gw.alert.event}"
+    return line
 
 
-def format_header(date: dt.date) -> str:
-    return f"\U0001f329️ NFL Weather Report — {date:%a %b} {date.day}"
+def format_header(date: dt.date, *, has_warning: bool = False) -> str:
+    header = f"\U0001f329️ NFL Weather Report — {date:%a %b} {date.day}"
+    if has_warning:
+        header += " ⚠️ Alerts in effect"
+    return header
 
 
 def _truncate(text: str, max_length: int) -> str:
@@ -52,7 +59,10 @@ def build_post_texts(
     if not games:
         return []
 
-    header = format_header(date)
+    has_warning = any(
+        gw.alert is not None and gw.alert.severity is AlertSeverity.WARNING for gw in games
+    )
+    header = format_header(date, has_warning=has_warning)
     # Reserve room for the header so it always fits alongside at least one game line -
     # otherwise a single oversized line could force a header-only first post.
     line_budget = max_length - len(header) - 1

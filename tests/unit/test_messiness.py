@@ -2,6 +2,7 @@ import datetime as dt
 
 import pytest
 
+from messy_weather_nfl_bot.alerts import AlertSeverity, WeatherAlert
 from messy_weather_nfl_bot.messiness import (
     Condition,
     classify_condition,
@@ -183,3 +184,66 @@ def test_sort_by_messiness_keeps_snow_first_when_a_stormier_period_scores_higher
     ranked = sort_by_messiness([clear, mixed_snow_and_storm])
 
     assert ranked[0] is mixed_snow_and_storm
+
+
+def test_evaluate_game_with_no_alerts_matches_the_no_alerts_argument_case() -> None:
+    weather = make_weather()
+    assert (
+        evaluate_game(make_game("GB"), [weather]).score
+        == evaluate_game(make_game("GB"), [weather], []).score
+    )
+
+
+def test_evaluate_game_adds_a_score_bonus_for_an_active_alert() -> None:
+    weather = make_weather()
+    plain = evaluate_game(make_game("GB"), [weather])
+    warned = evaluate_game(
+        make_game("GB"),
+        [weather],
+        [WeatherAlert("Winter Storm Warning", AlertSeverity.WARNING, None, None)],
+    )
+
+    assert warned.score > plain.score
+    assert warned.alert is not None
+    assert warned.alert.event == "Winter Storm Warning"
+
+
+def test_evaluate_game_warning_bonus_exceeds_watch_which_exceeds_advisory() -> None:
+    weather = make_weather()
+    warning = evaluate_game(
+        make_game("GB"),
+        [weather],
+        [WeatherAlert("Winter Storm Warning", AlertSeverity.WARNING, None, None)],
+    )
+    watch = evaluate_game(
+        make_game("GB"),
+        [weather],
+        [WeatherAlert("Severe Thunderstorm Watch", AlertSeverity.WATCH, None, None)],
+    )
+    advisory = evaluate_game(
+        make_game("GB"),
+        [weather],
+        [WeatherAlert("Heat Advisory", AlertSeverity.ADVISORY, None, None)],
+    )
+
+    assert warning.score > watch.score > advisory.score
+
+
+def test_evaluate_game_picks_the_most_severe_of_several_active_alerts() -> None:
+    weather = make_weather()
+    result = evaluate_game(
+        make_game("GB"),
+        [weather],
+        [
+            WeatherAlert("Heat Advisory", AlertSeverity.ADVISORY, None, None),
+            WeatherAlert("Winter Storm Warning", AlertSeverity.WARNING, None, None),
+        ],
+    )
+
+    assert result.alert is not None
+    assert result.alert.event == "Winter Storm Warning"
+
+
+def test_evaluate_game_with_no_active_alerts_has_no_alert() -> None:
+    result = evaluate_game(make_game("GB"), [make_weather()], [])
+    assert result.alert is None
