@@ -197,3 +197,26 @@ def test_get_active_alerts_skips_only_a_feature_with_a_malformed_timestamp() -> 
     alerts = get_active_alerts(LAT, LON, kickoff)
 
     assert [alert.event for alert in alerts] == ["Heat Advisory"]
+
+
+@respx.mock
+def test_get_active_alerts_skips_a_feature_with_a_timezone_naive_timestamp() -> None:
+    # A naive onset would otherwise raise TypeError once compared against the
+    # timezone-aware kickoff in _overlaps_window - that must not escape and crash the
+    # whole lookup, just drop this one feature.
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=dt.UTC)
+    respx.get(ALERTS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "features": [
+                    _feature("Winter Storm Warning", "2026-01-18T17:00:00", None),
+                    _feature("Heat Advisory", None, None),
+                ]
+            },
+        )
+    )
+
+    alerts = get_active_alerts(LAT, LON, kickoff)
+
+    assert [alert.event for alert in alerts] == ["Heat Advisory"]

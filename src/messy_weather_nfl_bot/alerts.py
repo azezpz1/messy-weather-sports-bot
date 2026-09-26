@@ -69,7 +69,13 @@ def most_severe(alerts: list[WeatherAlert]) -> WeatherAlert | None:
 def _parse_time(value: object) -> dt.datetime | None:
     if not isinstance(value, str):
         return None
-    return dt.datetime.fromisoformat(value)
+    parsed = dt.datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        # A naive timestamp would raise TypeError once compared against the
+        # timezone-aware kickoff in _overlaps_window - treat it the same as an
+        # unparseable one, so _feature_to_alert skips just this feature.
+        raise ValueError(f"NWS alert timestamp has no timezone: {value!r}")
+    return parsed
 
 
 def _overlaps_window(alert: WeatherAlert, start: dt.datetime, end: dt.datetime) -> bool:
