@@ -35,6 +35,13 @@ def _fixed_today(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("messy_weather_nfl_bot.main.todays_local_date", lambda: TARGET_DATE)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_state_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    # Every test gets its own state directory, so a run in one test can never see -
+    # or leave behind - state from another.
+    monkeypatch.setenv("MESSY_WEATHER_STATE_DIR", str(tmp_path / "state"))
+
+
 def _event(home: str, away: str, venue_name: str) -> dict:
     kickoff = "2026-01-18T18:00Z"
     return {
@@ -356,7 +363,7 @@ def test_an_unhandled_exception_still_sends_a_failure_ping(
     )
     monkeypatch.setattr(
         "messy_weather_nfl_bot.main.run",
-        lambda platform_names, dry_run: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda platform_names, dry_run, force: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
     with pytest.raises(RuntimeError, match="boom"):
@@ -368,6 +375,11 @@ def test_an_unhandled_exception_still_sends_a_failure_ping(
 def test_verbose_and_quiet_are_mutually_exclusive() -> None:
     with pytest.raises(SystemExit):
         parse_args(["--verbose", "--quiet"])
+
+
+def test_force_flag_defaults_to_false() -> None:
+    assert parse_args([]).force is False
+    assert parse_args(["--force"]).force is True
 
 
 @pytest.mark.parametrize(
@@ -401,6 +413,215 @@ def test_run_summary_is_logged_even_when_the_schedule_fetch_fails(
 
     assert exit_code == EXIT_NOTHING_POSTED
     assert "Run summary: unavailable game(s) found, 0 outdoor, 0 evaluated" in caplog.text
+
+
+@respx.mock
+def test_running_twice_posts_once_and_the_second_run_skips(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+
+    post_calls = {"count": 0}
+
+    class RecordingPoster(SocialMediaPoster):
+        def post(self, text: str) -> PostRef:
+            post_calls["count"] += 1
+            return PostRef(id="root", root_id="root")
+
+        def reply(self, text: str, parent: PostRef) -> PostRef:
+            post_calls["count"] += 1
+            return PostRef(id=f"reply-{post_calls['count']}", root_id=parent.root_id)
+
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_posters",
+        lambda platform_names, dry_run: [RecordingPoster()],
+    )
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+
+    first_exit = run(platform_names=["bluesky"], dry_run=False)
+    calls_after_first_run = post_calls["count"]
+    second_exit = run(platform_names=["bluesky"], dry_run=False)
+
+    assert first_exit == EXIT_OK
+    assert second_exit == EXIT_OK
+    assert post_calls["count"] == calls_after_first_run  # nothing new posted the second time
+    assert "already posted today's thread; skipping" in caplog.text
+
+
+@respx.mock
+def test_force_reposts_even_though_todays_thread_already_finished(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+
+    post_calls = {"count": 0}
+
+    class RecordingPoster(SocialMediaPoster):
+        def post(self, text: str) -> PostRef:
+            post_calls["count"] += 1
+            return PostRef(id=f"root-{post_calls['count']}", root_id=f"root-{post_calls['count']}")
+
+        def reply(self, text: str, parent: PostRef) -> PostRef:
+            post_calls["count"] += 1
+            return PostRef(id=f"reply-{post_calls['count']}", root_id=parent.root_id)
+
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_posters",
+        lambda platform_names, dry_run: [RecordingPoster()],
+    )
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+
+    run(platform_names=["bluesky"], dry_run=False)
+    calls_after_first_run = post_calls["count"]
+    exit_code = run(platform_names=["bluesky"], dry_run=False, force=True)
+
+    assert exit_code == EXIT_OK
+    assert post_calls["count"] > calls_after_first_run  # --force posted again
+
+
+@respx.mock
+def test_a_partial_thread_resumes_from_the_last_successful_post_on_rerun(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from messy_weather_nfl_bot.poster.base import PUBLISH_MAX_ATTEMPTS, PostRef, SocialMediaPoster
+
+    posted_texts: list[str] = []
+
+    class FailsFirstRepliesThenWorks(SocialMediaPoster):
+        """Every reply() call fails until enough calls have happened to exhaust
+        post_thread's own retries on the first attempted reply - so the first run's
+        thread stalls after the root, and only a fresh run's replies succeed."""
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def post(self, text: str) -> PostRef:
+            posted_texts.append(text)
+            return PostRef(id="root", root_id="root")
+
+        def reply(self, text: str, parent: PostRef) -> PostRef:
+            self.calls += 1
+            if self.calls <= PUBLISH_MAX_ATTEMPTS:
+                raise RuntimeError("platform outage")
+            posted_texts.append(text)
+            return PostRef(id=f"reply-{text}", root_id=parent.root_id)
+
+    poster = FailsFirstRepliesThenWorks()
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_posters",
+        lambda platform_names, dry_run: [poster],
+    )
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_post_texts",
+        lambda ranked, date: ["root post", "reply 1", "reply 2"],
+    )
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+
+    first_exit = run(platform_names=["bluesky"], dry_run=False)
+    assert first_exit == EXIT_PARTIAL
+    assert posted_texts == ["root post"]  # only the root went out before it stalled
+
+    second_exit = run(platform_names=["bluesky"], dry_run=False)
+
+    assert second_exit == EXIT_OK
+    # The root was never reposted on the resumed run - only the remaining replies went out.
+    assert posted_texts == ["root post", "reply 1", "reply 2"]
+
+
+@respx.mock
+def test_dry_run_never_reads_or_writes_state(tmp_path) -> None:
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+
+    run(platform_names=[], dry_run=True)
+    run(platform_names=[], dry_run=True)
+
+    assert not (tmp_path / "state").exists()
+
+
+@respx.mock
+def test_a_state_write_failure_does_not_change_the_posting_outcome(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # A successful post must count as posted even if persisting that fact to disk
+    # fails (a full disk, a read-only state dir) - the post already went out for
+    # real, regardless of whether the state write did.
+    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+
+    class RecordingPoster(SocialMediaPoster):
+        def post(self, text: str) -> PostRef:
+            return PostRef(id="root", root_id="root")
+
+        def reply(self, text: str, parent: PostRef) -> PostRef:
+            return PostRef(id="reply", root_id=parent.root_id)
+
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_posters",
+        lambda platform_names, dry_run: [RecordingPoster()],
+    )
+
+    def _broken_record(self, name, posts, *, completed):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("messy_weather_nfl_bot.state.DayState.record", _broken_record)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    exit_code = run(platform_names=["bluesky"], dry_run=False)
+
+    assert exit_code == EXIT_OK
+    assert "Could not save post state" in caplog.text
+
+
+@respx.mock
+def test_a_state_write_failure_after_a_partial_thread_does_not_escape_run(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Same as above, but for the other call site: recording state after a
+    # PartialThreadError must not let an OSError there propagate out of run() -
+    # the partial-posting outcome already happened for real.
+    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+
+    class FailsAfterRootPost(SocialMediaPoster):
+        def post(self, text: str) -> PostRef:
+            return PostRef(id="root", root_id="root")
+
+        def reply(self, text: str, parent: PostRef) -> PostRef:
+            raise RuntimeError("platform outage")
+
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_posters",
+        lambda platform_names, dry_run: [FailsAfterRootPost()],
+    )
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.build_post_texts",
+        lambda ranked, date: ["root post", "reply post"],
+    )
+
+    def _broken_record(self, name, posts, *, completed):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("messy_weather_nfl_bot.state.DayState.record", _broken_record)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
+
+    exit_code = run(platform_names=["bluesky"], dry_run=False)
+
+    assert exit_code == EXIT_PARTIAL
+    assert "Could not save post state" in caplog.text
+    assert "Partially posted" in caplog.text
 
 
 @respx.mock

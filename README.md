@@ -33,6 +33,7 @@ variables:
 | `BLUESKY_HANDLE`         | Your Bluesky handle, e.g. `example.bsky.social` |
 | `BLUESKY_APP_PASSWORD`   | An app password (not your account password)     |
 | `HEALTHCHECK_URL`        | Optional [Healthchecks.io](#failure-alerting-with-healthchecksio) ping URL |
+| `MESSY_WEATHER_STATE_DIR` | Optional override for [where post state is saved](#avoiding-duplicate-posts) |
 
 ## Running
 
@@ -49,12 +50,33 @@ uv run messy-weather-nfl-bot --platforms bluesky
 # More or less log detail:
 uv run messy-weather-nfl-bot --verbose   # DEBUG-level detail too
 uv run messy-weather-nfl-bot --quiet     # only warnings and errors
+
+# Repost today's thread even though it already finished:
+uv run messy-weather-nfl-bot --force
 ```
 
 Every run logs why each game found for the day was included or skipped (a
 covered stadium, an international/neutral-site venue, or a forecast that
 couldn't be fetched), followed by a one-line summary. Logs go to stderr with
 timestamps, so they're readable from cron/journald logs.
+
+### Avoiding duplicate posts
+
+The bot keeps a small per-day, per-platform state file recording the posts it
+has published successfully, so it's safe to re-run — a manual retry, an
+overlapping crontab entry, or a scheduler catch-up won't repost a thread
+that already finished today. Pass `--force` to repost anyway.
+
+If a thread only partly posted (e.g. reply 2 of 3 hit a network error), a
+re-run resumes it by replying to the last post that succeeded, instead of
+starting over — the root is never posted twice. Individual `reply()` calls
+are also retried a couple of times before the thread is given up on as
+partially posted.
+
+State files live at `$XDG_STATE_HOME/messy-weather-bot/<date>.json` (or
+`~/.local/state/messy-weather-bot/<date>.json` if `XDG_STATE_HOME` isn't
+set), overridable via `MESSY_WEATHER_STATE_DIR`. `--dry-run` never reads or
+writes this state.
 
 ### Failure alerting with Healthchecks.io
 
