@@ -43,6 +43,8 @@ def main() -> int:
                 return 1
             games_checked += len(games)
             drift.extend(venue_drift(games))
+            for g in games:
+                print(f"DEBUGVENUE {g.home_team} id={g.venue_id!r} name={g.venue_name!r}")
 
     end = start + dt.timedelta(days=DAYS_TO_CHECK - 1)
     print(f"Checked {games_checked} game(s) from {start} to {end}.")
