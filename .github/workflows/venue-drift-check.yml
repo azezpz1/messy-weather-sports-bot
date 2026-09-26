@@ -1,0 +1,31 @@
+name: Venue drift check
+
+on:
+  schedule:
+    # Every Monday at 12:00 UTC, during the NFL season (Sept through early Feb).
+    - cron: "0 12 * 9-12,1-2 1"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # Fails the job (and notifies via the repo's normal Actions failure
+      # notifications) when a US game's venue isn't recognized in stadiums.py.
+      - name: Check for venue drift
+        run: uv run python scripts/check_venue_drift.py

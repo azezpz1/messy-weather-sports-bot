@@ -20,7 +20,7 @@ from messy_weather_nfl_bot.schedule import SCOREBOARD_URL
 LOGGER_NAME = "messy_weather_nfl_bot"
 
 GB_LAT, GB_LON = 44.5013, -88.0622
-BUF_LAT, BUF_LON = 42.7738, -78.7870
+BUF_LAT, BUF_LON = 42.77306, -78.79222
 TARGET_DATE = dt.date(2026, 1, 18)
 
 
@@ -280,10 +280,7 @@ def test_skipped_games_log_their_reason(caplog: pytest.LogCaptureFixture) -> Non
 
     assert exit_code == EXIT_OK  # no outdoor games today at all
     assert "DET @ MIN — skipped: covered stadium (U.S. Bank Stadium)" in caplog.text
-    assert (
-        'PHI @ JAX — skipped: international/neutral-site venue "Tottenham Hotspur Stadium"'
-        in caplog.text
-    )
+    assert 'PHI @ JAX — skipped: international venue "Tottenham Hotspur Stadium"' in caplog.text
 
 
 @respx.mock
