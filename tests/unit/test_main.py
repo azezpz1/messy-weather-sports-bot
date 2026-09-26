@@ -83,6 +83,10 @@ def _mock_hourly_forecast(lat: float, lon: float, *, response: httpx.Response) -
         return_value=httpx.Response(200, json={"properties": {"forecastHourly": hourly_url}})
     )
     respx.get(hourly_url).mock(return_value=response)
+    # No active alerts by default - individual tests override this route for alert cases.
+    respx.get(f"https://api.weather.gov/alerts/active?point={lat},{lon}").mock(
+        return_value=httpx.Response(200, json={"features": []})
+    )
 
 
 def _clear_period_response() -> httpx.Response:
@@ -142,6 +146,53 @@ def test_all_games_succeed_returns_ok() -> None:
     exit_code = run(platform_names=[], dry_run=True)
 
     assert exit_code == EXIT_OK
+
+
+@respx.mock
+def test_an_active_warning_appears_on_the_game_line(capsys: pytest.CaptureFixture) -> None:
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    # Override GB's default "no active alerts" mock with an active, overlapping warning.
+    respx.get(f"https://api.weather.gov/alerts/active?point={GB_LAT},{GB_LON}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "features": [
+                    {
+                        "properties": {
+                            "event": "Winter Storm Warning",
+                            "onset": "2026-01-18T17:00:00+00:00",
+                            "ends": "2026-01-18T23:00:00+00:00",
+                        }
+                    }
+                ]
+            },
+        )
+    )
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "Winter Storm Warning" in out
+
+
+@respx.mock
+def test_a_failed_alert_lookup_does_not_skip_the_game(capsys: pytest.CaptureFixture) -> None:
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    # GB's alert lookup is persistently broken - the game must still post, with no alert.
+    respx.get(f"https://api.weather.gov/alerts/active?point={GB_LAT},{GB_LON}").mock(
+        return_value=httpx.Response(500)
+    )
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "CHI @ GB" in out
 
 
 @respx.mock

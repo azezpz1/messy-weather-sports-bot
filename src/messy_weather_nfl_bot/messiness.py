@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from messy_weather_nfl_bot.alerts import SEVERITY_SCORE_BONUS, WeatherAlert, most_severe
 from messy_weather_nfl_bot.schedule import Game
 from messy_weather_nfl_bot.weather import WeatherReport
 
@@ -64,6 +65,9 @@ class GameWeather:
     """Whether snow appears in any period across the game, even if a later, higher-scoring
     period is what's shown as `weather`/`condition` - used to keep snow games ranked
     first regardless of which period ends up being the messiest one."""
+    alert: WeatherAlert | None
+    """The most severe active NWS alert (Warning > Watch > Advisory) overlapping the
+    game, or None if there isn't one."""
 
 
 def classify_condition(weather: WeatherReport) -> Condition:
@@ -100,19 +104,32 @@ def messiness_score(weather: WeatherReport, condition: Condition) -> float:
     return precip_component + wind_component + temp_extremity + _CONDITION_SCORE_BONUS[condition]
 
 
-def evaluate_game(game: Game, weather_reports: list[WeatherReport]) -> GameWeather:
+def evaluate_game(
+    game: Game,
+    weather_reports: list[WeatherReport],
+    alerts: list[WeatherAlert] | None = None,
+) -> GameWeather:
     """Evaluate every forecast period spanning the game and report the messiest one -
     weather can turn ugly well after kickoff, so the worst point in the game is what
-    matters, not just the conditions at the opening whistle."""
+    matters, not just the conditions at the opening whistle. `alerts` should already be
+    filtered to ones overlapping the game; the most severe one adds a flat bonus to the
+    score, on top of whichever period turns out messiest."""
     scored = [(classify_condition(weather), weather) for weather in weather_reports]
     has_snow = any(condition is Condition.SNOW for condition, _ in scored)
+    alert = most_severe(alerts or [])
+    alert_bonus = SEVERITY_SCORE_BONUS[alert.severity] if alert is not None else 0.0
 
     worst: GameWeather | None = None
     for condition, weather in scored:
-        score = messiness_score(weather, condition)
+        score = messiness_score(weather, condition) + alert_bonus
         if worst is None or score > worst.score:
             worst = GameWeather(
-                game=game, weather=weather, condition=condition, score=score, has_snow=has_snow
+                game=game,
+                weather=weather,
+                condition=condition,
+                score=score,
+                has_snow=has_snow,
+                alert=alert,
             )
     assert worst is not None  # weather_reports is always non-empty (see get_forecast)
     return worst
