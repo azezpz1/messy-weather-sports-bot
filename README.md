@@ -205,12 +205,18 @@ repository secret to be provisioned by a maintainer.
 ### Pre-commit hooks
 
 Optionally, install [pre-commit](https://pre-commit.com/) to run ruff (lint
-and format) and ty automatically before each commit:
+and format) and ty automatically before each commit, and the full
+`scripts/check.sh` (lint, format, types, unit tests) before each push:
 
 ```sh
 uv tool install pre-commit --with pre-commit-uv
-pre-commit install
+pre-commit install                    # lint/format/types on commit
+pre-commit install --hook-type pre-push  # full check before push
 ```
+
+`scripts/check.sh` runs the same checks as CI and can also be run directly
+at any time (`./scripts/check.sh` for the full suite, or
+`./scripts/check.sh -m "not integration"` to skip network-dependent tests).
 
 ### Code coverage
 
