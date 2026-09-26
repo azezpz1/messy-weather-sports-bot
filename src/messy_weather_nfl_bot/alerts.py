@@ -89,12 +89,14 @@ def _feature_to_alert(feature: object) -> WeatherAlert | None:
     event = properties.get("event")
     if not isinstance(event, str) or not event:
         return None
-    return WeatherAlert(
-        event=event,
-        severity=classify_severity(event),
-        onset=_parse_time(properties.get("onset")),
-        ends=_parse_time(properties.get("ends") or properties.get("expires")),
-    )
+    try:
+        onset = _parse_time(properties.get("onset"))
+        ends = _parse_time(properties.get("ends") or properties.get("expires"))
+    except ValueError:
+        # A malformed timestamp must drop this one feature, not silently become a
+        # missing bound - _overlaps_window treats None as covering the whole game.
+        return None
+    return WeatherAlert(event=event, severity=classify_severity(event), onset=onset, ends=ends)
 
 
 def _alert_features(payload: object) -> list[object]:

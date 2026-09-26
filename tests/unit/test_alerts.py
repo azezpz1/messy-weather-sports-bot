@@ -175,3 +175,25 @@ def test_get_active_alerts_ignores_a_feature_missing_an_event() -> None:
     )
 
     assert get_active_alerts(LAT, LON, kickoff) == []
+
+
+@respx.mock
+def test_get_active_alerts_skips_only_a_feature_with_a_malformed_timestamp() -> None:
+    # A malformed onset/ends on one feature must not raise (which would otherwise
+    # discard every other, well-formed alert too) - just that one feature is skipped.
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=dt.UTC)
+    respx.get(ALERTS_URL).mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "features": [
+                    _feature("Winter Storm Warning", "not-a-timestamp", None),
+                    _feature("Heat Advisory", None, None),
+                ]
+            },
+        )
+    )
+
+    alerts = get_active_alerts(LAT, LON, kickoff)
+
+    assert [alert.event for alert in alerts] == ["Heat Advisory"]
