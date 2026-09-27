@@ -69,7 +69,10 @@ uv run messy-weather-nfl-bot --quiet     # only warnings and errors
 uv run messy-weather-nfl-bot --force
 ```
 
-Every run logs why each game found for the day was included or skipped (a
+Every run starts by logging the installed version (e.g.
+`messy-weather-nfl-bot 2.0.1 starting`), so a log - or a Healthchecks.io ping
+body - always says which release produced it. It then logs why each game found
+for the day was included or skipped (a
 covered stadium, an international venue, an unrecognized venue, or a forecast
 that couldn't be fetched), followed by a one-line summary. Logs go to stderr
 with timestamps, so they're readable from cron/journald logs.
