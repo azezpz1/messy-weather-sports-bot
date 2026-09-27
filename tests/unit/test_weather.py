@@ -284,3 +284,36 @@ def test_get_forecast_raises_a_clean_error_on_a_non_object_period() -> None:
 
     with pytest.raises(ValueError, match="startTime"):
         get_forecast(LAT, LON, kickoff)
+
+
+# Highmark Stadium's coordinates, as stored in stadiums.py - NWS only accepts 4 decimal
+# places in a point and 301-redirects anything more precise to the rounded point.
+BUF_LAT, BUF_LON = 42.77306, -78.79222
+
+
+@respx.mock
+def test_get_forecast_rounds_an_over_precise_point_instead_of_hitting_the_redirect() -> None:
+    # Regression for 2026-09-27: NWS started redirecting Buffalo's 5-decimal point, and
+    # since the redirect isn't followed, Buffalo's game silently dropped out of the post.
+    respx.get(f"https://api.weather.gov/points/{BUF_LAT},{BUF_LON}").mock(
+        return_value=httpx.Response(301, headers={"Location": "/points/42.7731,-78.7922"})
+    )
+    respx.get("https://api.weather.gov/points/42.7731,-78.7922").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "properties": {
+                    "forecastHourly": "https://api.weather.gov/gridpoints/BUF/1,1/forecast/hourly"
+                }
+            },
+        )
+    )
+    periods = [_hourly_period("2026-01-18T18:00:00-05:00", "Snow", 25, "15 mph", 80)]
+    respx.get("https://api.weather.gov/gridpoints/BUF/1,1/forecast/hourly").mock(
+        return_value=httpx.Response(200, json={"properties": {"periods": periods}})
+    )
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    reports = get_forecast(BUF_LAT, BUF_LON, kickoff)
+
+    assert [report.short_forecast for report in reports] == ["Snow"]
