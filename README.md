@@ -19,8 +19,21 @@ games that day, the bot posts nothing.
 Requires [uv](https://docs.astral.sh/uv/).
 
 ```sh
+git clone https://github.com/azezpz1/messy-weather-sports-bot.git
+cd messy-weather-sports-bot
 uv sync
 ```
+
+Note the two different names: the checkout directory is
+`messy-weather-sports-bot` (the repo's name), while the command it installs is
+`messy-weather-nfl-bot`. Paths in crontab entries below need the directory
+name. A `cd` into a nonexistent `messy-weather-nfl-bot` directory fails before
+the command after it runs, and a `>> log 2>&1` at the end of the entry only
+captures that later command - so the failure never reaches the log, and an
+update job pointed at the wrong directory goes unnoticed while the checkout
+your posts run from never updates. The update entry below groups the whole
+command under one redirect, to a log outside the checkout, so a failed `cd`
+is logged too.
 
 ## Configuration
 
@@ -117,7 +130,7 @@ Thursdays, Sundays, and Mondays:
 
 ```cron
 # m h  dom mon dow          command
-0  9   *   *   0,1,4        cd /path/to/messy-weather-nfl-bot && uv run messy-weather-nfl-bot
+0  9   *   *   0,1,4        cd /path/to/messy-weather-sports-bot && uv run messy-weather-nfl-bot
 ```
 
 Cron does not load your shell profile or `.env` files automatically, so
@@ -143,7 +156,7 @@ Rather than tracking `main` directly, point a deployment (e.g. a Raspberry
 Pi) at the latest tag instead, using `scripts/update-to-latest-release.sh`:
 
 ```sh
-cd /path/to/messy-weather-nfl-bot
+cd /path/to/messy-weather-sports-bot
 ./scripts/update-to-latest-release.sh
 ```
 
@@ -164,8 +177,8 @@ run:
 
 ```cron
 # m h  dom mon dow          command
-0  0   *   *   6            cd /path/to/messy-weather-nfl-bot && ./scripts/update-to-latest-release.sh >> update-to-latest-release.log 2>&1
-0  9   *   *   0,1,4        cd /path/to/messy-weather-nfl-bot && uv run messy-weather-nfl-bot
+0  0   *   *   6            { cd /path/to/messy-weather-sports-bot && ./scripts/update-to-latest-release.sh; } >> $HOME/messy-weather-update.log 2>&1
+0  9   *   *   0,1,4        cd /path/to/messy-weather-sports-bot && uv run messy-weather-nfl-bot
 ```
 
 ## Development
