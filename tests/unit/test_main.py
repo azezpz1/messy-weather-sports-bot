@@ -1,4 +1,5 @@
 import datetime as dt
+import importlib.metadata
 import logging
 
 import httpx
@@ -493,6 +494,74 @@ def test_an_unhandled_exception_still_sends_a_failure_ping(
         main(["--dry-run"])
 
     assert end_route.called
+
+
+INSTALLED_VERSION = importlib.metadata.version("messy-weather-nfl-bot")
+
+
+@respx.mock
+def test_the_running_version_is_logged_first(caplog: pytest.LogCaptureFixture) -> None:
+    # So a cron log says which release produced it - e.g. to tell a Pi still on an
+    # old release from one whose update job silently never ran.
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+
+    main(["--dry-run"])
+
+    assert caplog.records[0].getMessage() == f"messy-weather-nfl-bot {INSTALLED_VERSION} starting"
+
+
+@respx.mock
+def test_the_healthcheck_completion_body_includes_the_running_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/test-uuid")
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+    respx.get("https://hc-ping.com/test-uuid/start").mock(return_value=httpx.Response(200))
+    end_route = respx.post("https://hc-ping.com/test-uuid/0").mock(return_value=httpx.Response(200))
+
+    main(["--dry-run"])
+
+    body = end_route.calls.last.request.content.decode()
+    assert f"messy-weather-nfl-bot {INSTALLED_VERSION} starting" in body
+
+
+@respx.mock
+def test_the_failure_ping_after_a_crash_includes_the_running_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/test-uuid")
+    respx.get("https://hc-ping.com/test-uuid/start").mock(return_value=httpx.Response(200))
+    end_route = respx.post(f"https://hc-ping.com/test-uuid/{EXIT_NOTHING_POSTED}").mock(
+        return_value=httpx.Response(200)
+    )
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.run",
+        lambda platform_names, dry_run, force: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    with pytest.raises(RuntimeError, match="boom"):
+        main(["--dry-run"])
+
+    body = end_route.calls.last.request.content.decode()
+    assert f"messy-weather-nfl-bot {INSTALLED_VERSION} starting" in body
+
+
+@respx.mock
+def test_an_uninstalled_package_logs_an_unknown_version_instead_of_crashing(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # e.g. run straight from a source tree that was never `uv sync`ed.
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))
+
+    def _not_installed(name: str) -> str:
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr("importlib.metadata.version", _not_installed)
+
+    assert main(["--dry-run"]) == EXIT_OK
+    assert "messy-weather-nfl-bot (unknown version) starting" in caplog.text
 
 
 def test_verbose_and_quiet_are_mutually_exclusive() -> None:
