@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import io
 import logging
 import os
@@ -24,6 +25,8 @@ from messy_weather_nfl_bot.weather import USER_AGENT, WeatherReport, get_forecas
 logger = logging.getLogger("messy_weather_nfl_bot")
 
 LOG_FORMAT = "%(asctime)s %(levelname)-8s %(message)s"
+
+DISTRIBUTION_NAME = "messy-weather-nfl-bot"
 
 # So cron wrappers and health checks can tell "nothing posted" from "posted, but
 # degraded" from a clean run.
@@ -89,6 +92,16 @@ def configure_logging(
     for handler in extra_handlers:
         handler.setFormatter(logging.Formatter(LOG_FORMAT))
         logger.addHandler(handler)
+
+
+def running_version() -> str | None:
+    """The installed package version - the one the release workflow bumps in
+    pyproject.toml and `uv sync` installs - or None if the package isn't installed
+    (e.g. run straight from a source tree that was never synced)."""
+    try:
+        return importlib.metadata.version(DISTRIBUTION_NAME)
+    except importlib.metadata.PackageNotFoundError:
+        return None
 
 
 def build_posters(platform_names: list[str], dry_run: bool) -> list[SocialMediaPoster]:
@@ -280,6 +293,10 @@ def main(argv: list[str] | None = None) -> int:
     configure_logging(
         verbose=args.verbose, quiet=args.quiet, extra_handlers=[logging.StreamHandler(log_buffer)]
     )
+    # First, so every run's log - and the healthcheck body built from it, even after a
+    # crash - says which release produced it.
+    version = running_version()
+    logger.info("%s %s starting", DISTRIBUTION_NAME, version if version else "(unknown version)")
     platform_names = [p.strip() for p in args.platforms.split(",") if p.strip()]
 
     healthcheck_url = os.environ.get(healthcheck.ENV_VAR)
