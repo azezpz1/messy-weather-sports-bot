@@ -28,9 +28,12 @@ Note the two different names: the checkout directory is
 `messy-weather-sports-bot` (the repo's name), while the command it installs is
 `messy-weather-nfl-bot`. Paths in crontab entries below need the directory
 name. A `cd` into a nonexistent `messy-weather-nfl-bot` directory fails before
-anything is written to the entry's log file (unless the entry also redirects
-stderr with `2>&1`), so an update job pointed at the wrong directory can go
-unnoticed while the checkout your posts run from never updates.
+the command after it runs, and a `>> log 2>&1` at the end of the entry only
+captures that later command - so the failure never reaches the log, and an
+update job pointed at the wrong directory goes unnoticed while the checkout
+your posts run from never updates. The update entry below groups the whole
+command under one redirect, to a log outside the checkout, so a failed `cd`
+is logged too.
 
 ## Configuration
 
@@ -174,7 +177,7 @@ run:
 
 ```cron
 # m h  dom mon dow          command
-0  0   *   *   6            cd /path/to/messy-weather-sports-bot && ./scripts/update-to-latest-release.sh >> update-to-latest-release.log 2>&1
+0  0   *   *   6            { cd /path/to/messy-weather-sports-bot && ./scripts/update-to-latest-release.sh; } >> $HOME/messy-weather-update.log 2>&1
 0  9   *   *   0,1,4        cd /path/to/messy-weather-sports-bot && uv run messy-weather-nfl-bot
 ```
 
