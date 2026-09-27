@@ -14,3 +14,10 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      - id: check-pre-push
+        name: check (lint, format, types, unit tests)
+        entry: scripts/check.sh -m "not integration"
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
