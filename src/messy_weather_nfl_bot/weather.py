@@ -10,7 +10,12 @@ import httpx
 
 from messy_weather_nfl_bot.retry import request_with_retry
 
-POINTS_URL = "https://api.weather.gov/points/{lat},{lon}"
+POINTS_URL = "https://api.weather.gov/points/{point}"
+
+# NWS accepts at most 4 decimal places in a lat,lon point (~11m, far finer than its
+# 2.5km forecast grid) and 301-redirects anything more precise to the rounded point.
+# httpx doesn't follow redirects by default, so an over-precise point fails outright.
+NWS_POINT_DECIMALS = 4
 
 # NWS asks API consumers to identify themselves in the User-Agent.
 USER_AGENT = "messy-weather-sports-bot (https://github.com/azezpz1/messy-weather-sports-bot)"
@@ -31,6 +36,13 @@ class WeatherReport:
     wind_speed_mph: float
     precipitation_probability: int | None
     """Percent chance of precipitation (0-100), or None if NWS didn't report one."""
+
+
+def nws_point(latitude: float, longitude: float) -> str:
+    """Format a location as an NWS `lat,lon` point, rounded to the precision NWS
+    accepts. round() rather than a fixed-width format, so an already-short coordinate
+    like 44.5 isn't padded to 44.5000 - which NWS would redirect too."""
+    return f"{round(latitude, NWS_POINT_DECIMALS)},{round(longitude, NWS_POINT_DECIMALS)}"
 
 
 def _parse_wind_speed_mph(wind_speed: str) -> float:
@@ -140,7 +152,7 @@ def get_forecast(
 
     try:
         points_response = request_with_retry(
-            lambda: _get(POINTS_URL.format(lat=latitude, lon=longitude))
+            lambda: _get(POINTS_URL.format(point=nws_point(latitude, longitude)))
         )
         forecast_url = _forecast_hourly_url(points_response.json())
 
