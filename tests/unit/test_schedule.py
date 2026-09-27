@@ -244,6 +244,37 @@ def test_present_but_incomplete_international_venue_is_not_a_home_stadium_fallba
 
 
 @respx.mock
+def test_explicit_empty_venue_object_is_not_a_home_stadium_fallback() -> None:
+    # ESPN sending `"venue": {}` is a *present* (if empty) venue object, distinct
+    # from omitting the "venue" key entirely - it must not be treated as "no venue
+    # data" and silently resolved to the home team's usual stadium.
+    payload = {
+        "events": [
+            {
+                "date": "2026-01-18T18:00Z",
+                "competitions": [
+                    {
+                        "date": "2026-01-18T18:00Z",
+                        "venue": {},
+                        "competitors": [
+                            {"homeAway": "home", "team": {"abbreviation": "BUF"}},
+                            {"homeAway": "away", "team": {"abbreviation": "MIA"}},
+                        ],
+                    }
+                ],
+            }
+        ],
+    }
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=payload))
+
+    games = get_todays_games(TARGET_DATE)
+
+    assert games[0].stadium is None
+    assert games[0].is_venue_drift is True
+    assert games[0].unresolved_reason == "unrecognized venue \"\" (espn venue id '')"
+
+
+@respx.mock
 def test_unknown_country_is_drift_not_silently_treated_as_international() -> None:
     # A present venue with a name we don't recognize and no country at all should
     # be reported as drift (loud), not silently classified as international (which

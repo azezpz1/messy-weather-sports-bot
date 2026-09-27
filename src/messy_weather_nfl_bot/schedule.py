@@ -59,22 +59,27 @@ def _is_confirmed_international(venue_address: dict) -> bool:
 def _resolve_stadium(
     home_team: str,
     venue: dict,
+    venue_present: bool,
 ) -> tuple[StadiumInfo | None, str | None, bool]:
     """Resolve a game's venue against *all* known stadiums (not just the home team's),
     so a relocated game or a renamed venue still resolves. Returns
     `(stadium, reason, is_drift)`, where `reason` explains why `stadium` is None and
     `is_drift` flags an unrecognized US venue - see `Game.is_venue_drift`.
+
+    `venue_present` distinguishes ESPN omitting the `venue` key (or sending it as
+    `null`) from ESPN sending an explicit but empty `{}` - `venue` alone can't tell
+    those apart, since both end up as `{}` by the time it gets here.
     """
     venue_id = str(venue.get("id") or "")
     venue_name = venue.get("fullName", "")
     stadium = stadium_for_venue(venue_id, venue_name)
     if stadium is None:
-        if not venue:
+        if not venue_present:
             # ESPN gave us no venue data at all - fall back to the home team's usual
             # stadium rather than dropping the game outright. A *present* venue with
-            # no id/name (but e.g. an address) is not this case - it's an
-            # unrecognized venue, handled below, not a reason to guess the home
-            # team's stadium instead of the actual (possibly different) one.
+            # no id/name (but e.g. an address, or literally `{}`) is not this case -
+            # it's an unrecognized venue, handled below, not a reason to guess the
+            # home team's stadium instead of the actual (possibly different) one.
             try:
                 stadium = stadium_for_team(home_team)
             except KeyError:
@@ -145,8 +150,11 @@ def get_todays_games(date: dt.date | None = None, client: httpx.Client | None = 
         home_team = home["team"]["abbreviation"]
         away_team = away["team"]["abbreviation"]
 
-        venue = competition.get("venue") or {}
-        stadium, unresolved_reason, is_venue_drift = _resolve_stadium(home_team, venue)
+        raw_venue = competition.get("venue")
+        venue = raw_venue or {}
+        stadium, unresolved_reason, is_venue_drift = _resolve_stadium(
+            home_team, venue, venue_present=raw_venue is not None
+        )
 
         games.append(
             Game(
