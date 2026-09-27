@@ -30,7 +30,9 @@ the forecast shows:
 | Cold / heat   | ≤32°F or ≥95°F                                       |
 
 So a "Slight Chance Rain Showers" (NWS's wording for 15–24%) sunny afternoon
-doesn't make the cut. An NWS alert on its own doesn't either — alerts for a
+doesn't make the cut. If NWS reports no precipitation odds for an hour at all,
+the forecast text is taken at its word - "Rain" with no reported odds still
+counts as rain. An NWS alert on its own doesn't either — alerts for a
 stadium's location include things like Small Craft Advisories — but an active
 alert does push an already-messy game up the ranking and is shown on its line.
 Messy games are ranked snow first, then by a combined score of wind,
@@ -131,7 +133,9 @@ With `HEALTHCHECK_URL` set, the bot pings `{url}/start` when a run begins and
 `{url}/{exit_code}` when it ends (carrying the run summary and log tail as
 the ping body) — `0` means success, anything else is a failure, reusing this
 bot's own exit codes. Days with no outdoor games, or no messy ones, still
-ping success, so they don't look like a missed run. A failed ping is logged but never affects the
+ping success, so they don't look like a missed run - unless a game's forecast
+couldn't be fetched, in which case a no-messy-games day exits `2` (partial),
+since the missing game might have been the messy one. A failed ping is logged but never affects the
 run's outcome — the bot doesn't need `HEALTHCHECK_URL` set at all, and
 nothing is pinged if it's unset.
 
