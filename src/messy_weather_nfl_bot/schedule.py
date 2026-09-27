@@ -16,8 +16,7 @@ SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/sco
 # NFL scheduling (and this bot's cron) revolves around US Eastern game days.
 GAME_DAY_TIMEZONE = ZoneInfo("America/New_York")
 
-# Country names ESPN uses for US venues. Anything else (or a venue with no address at
-# all, which only happens for non-US venues in practice) is treated as international.
+# Country names ESPN uses for US venues.
 US_COUNTRY_NAMES = frozenset({"USA", "United States", "United States of America"})
 
 
@@ -47,40 +46,47 @@ def todays_local_date(now: dt.datetime | None = None) -> dt.date:
     return current.astimezone(GAME_DAY_TIMEZONE).date()
 
 
-def _is_international(venue_address: dict) -> bool:
+def _is_confirmed_international(venue_address: dict) -> bool:
+    """True only when ESPN reports a non-US country. A *missing* country is
+    deliberately not treated as international - it's ambiguous, and treating it as
+    international would silently exclude an unrecognized US venue from
+    `venue_drift()`, the exact silent-drop failure mode this module exists to avoid.
+    """
     country = venue_address.get("country")
-    return not country or country not in US_COUNTRY_NAMES
+    return bool(country) and country not in US_COUNTRY_NAMES
 
 
 def _resolve_stadium(
     home_team: str,
-    venue_id: str,
-    venue_name: str,
-    venue_indoor: bool,
-    venue_address: dict,
+    venue: dict,
 ) -> tuple[StadiumInfo | None, str | None, bool]:
     """Resolve a game's venue against *all* known stadiums (not just the home team's),
     so a relocated game or a renamed venue still resolves. Returns
     `(stadium, reason, is_drift)`, where `reason` explains why `stadium` is None and
     `is_drift` flags an unrecognized US venue - see `Game.is_venue_drift`.
     """
+    venue_id = str(venue.get("id") or "")
+    venue_name = venue.get("fullName", "")
     stadium = stadium_for_venue(venue_id, venue_name)
     if stadium is None:
-        if not venue_id and not venue_name:
-            # ESPN gave us nothing to match against - fall back to the home team's
-            # usual stadium rather than dropping the game outright.
+        if not venue:
+            # ESPN gave us no venue data at all - fall back to the home team's usual
+            # stadium rather than dropping the game outright. A *present* venue with
+            # no id/name (but e.g. an address) is not this case - it's an
+            # unrecognized venue, handled below, not a reason to guess the home
+            # team's stadium instead of the actual (possibly different) one.
             try:
                 stadium = stadium_for_team(home_team)
             except KeyError:
                 return None, f"unrecognized home team {home_team!r}", False
-        elif _is_international(venue_address):
+        elif _is_confirmed_international(venue.get("address") or {}):
             return None, f'international venue "{venue_name}"', False
         else:
-            # A named, non-international venue we don't have on file - likely a
+            # A US (or unconfirmed-country) venue we don't have on file - likely a
             # stadium rename or relocation `stadiums.py` hasn't caught up with yet.
             reason = f'unrecognized venue "{venue_name}" (espn venue id {venue_id!r})'
             return None, reason, True
-    if venue_indoor and not stadium.is_covered:
+    if venue.get("indoor") and not stadium.is_covered:
         # ESPN says this particular game is indoors even though the matched stadium is
         # open-air (e.g. relocated to a covered neutral site) - treat as covered.
         covered = StadiumInfo(
@@ -140,15 +146,7 @@ def get_todays_games(date: dt.date | None = None, client: httpx.Client | None = 
         away_team = away["team"]["abbreviation"]
 
         venue = competition.get("venue") or {}
-        venue_id = str(venue.get("id") or "")
-        venue_name = venue.get("fullName", "")
-        stadium, unresolved_reason, is_venue_drift = _resolve_stadium(
-            home_team,
-            venue_id,
-            venue_name,
-            bool(venue.get("indoor", False)),
-            venue.get("address") or {},
-        )
+        stadium, unresolved_reason, is_venue_drift = _resolve_stadium(home_team, venue)
 
         games.append(
             Game(
@@ -156,8 +154,8 @@ def get_todays_games(date: dt.date | None = None, client: httpx.Client | None = 
                 away_team=away_team,
                 kickoff=kickoff,
                 stadium=stadium,
-                venue_name=venue_name,
-                venue_id=venue_id,
+                venue_name=venue.get("fullName", ""),
+                venue_id=str(venue.get("id") or ""),
                 unresolved_reason=unresolved_reason,
                 is_venue_drift=is_venue_drift,
             )

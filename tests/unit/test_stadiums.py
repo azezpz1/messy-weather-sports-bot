@@ -34,6 +34,16 @@ def test_stadium_for_venue_matches_by_alias() -> None:
     assert stadium_for_venue("", "Heinz Field") is stadium_for_team("PIT")
 
 
+def test_production_venue_id_resolves_a_renamed_venue_without_an_alias() -> None:
+    # PIT's confirmed ESPN venue id (pulled from a live scoreboard response), used
+    # here with a name that isn't PIT's current name *or* a listed alias - proving
+    # ID-first resolution works against the shipped STADIUMS table, not just a
+    # monkeypatched one.
+    pit = stadium_for_team("PIT")
+    assert pit.venue_id == "3752"
+    assert stadium_for_venue("3752", "Some Future Sponsor Field") is pit
+
+
 def test_stadium_for_venue_matches_by_id_even_with_unknown_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

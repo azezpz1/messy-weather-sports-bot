@@ -160,6 +160,26 @@ def test_renamed_venue_resolves_by_stable_id_even_with_an_unknown_name(
 
 
 @respx.mock
+def test_shipped_venue_id_resolves_a_renamed_venue_without_monkeypatching() -> None:
+    # PIT's confirmed ESPN venue id, already in the shipped STADIUMS table (pulled
+    # from a live scoreboard response) - proves ID-first resolution works end to end
+    # against production data, not just a monkeypatched stadium record.
+    pit_stadium = stadium_for_team("PIT")
+    payload = {
+        "events": [
+            _event("PIT", "BAL", "2026-01-18T18:00Z", "Some Future Sponsor Field", venue_id="3752")
+        ]
+    }
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=payload))
+
+    games = get_todays_games(TARGET_DATE)
+
+    assert games[0].stadium is not None
+    assert games[0].stadium.latitude == pit_stadium.latitude
+    assert games[0].stadium.longitude == pit_stadium.longitude
+
+
+@respx.mock
 def test_unrecognized_us_venue_is_logged_as_drift_with_id_and_name() -> None:
     payload = {
         "events": [_event("BUF", "MIA", "2026-01-18T18:00Z", "Some New Stadium", venue_id="99999")],
@@ -178,8 +198,22 @@ def test_unrecognized_us_venue_is_logged_as_drift_with_id_and_name() -> None:
 
 @respx.mock
 def test_unrecognized_team_with_no_venue_data_has_no_resolvable_stadium() -> None:
+    # ESPN omits the "venue" key entirely - not just an empty name/id within it.
     payload = {
-        "events": [_event("XYZ", "MIA", "2026-01-18T18:00Z", "", venue_country="")],
+        "events": [
+            {
+                "date": "2026-01-18T18:00Z",
+                "competitions": [
+                    {
+                        "date": "2026-01-18T18:00Z",
+                        "competitors": [
+                            {"homeAway": "home", "team": {"abbreviation": "XYZ"}},
+                            {"homeAway": "away", "team": {"abbreviation": "MIA"}},
+                        ],
+                    }
+                ],
+            }
+        ],
     }
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=payload))
 
@@ -188,6 +222,43 @@ def test_unrecognized_team_with_no_venue_data_has_no_resolvable_stadium() -> Non
     assert games[0].stadium is None
     assert games[0].is_venue_drift is False
     assert games[0].unresolved_reason == "unrecognized home team 'XYZ'"
+
+
+@respx.mock
+def test_present_but_incomplete_international_venue_is_not_a_home_stadium_fallback() -> None:
+    # A venue object with an address but no id/name is *present*, not absent - it
+    # must not fall back to the home team's usual stadium (which could be a
+    # different, wrong location), even though id and name are both blank.
+    payload = {
+        "events": [
+            _event("JAX", "NE", "2026-01-18T18:00Z", "", venue_country="England"),
+        ],
+    }
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=payload))
+
+    games = get_todays_games(TARGET_DATE)
+
+    assert games[0].stadium is None
+    assert games[0].is_venue_drift is False
+    assert games[0].unresolved_reason == 'international venue ""'
+
+
+@respx.mock
+def test_unknown_country_is_drift_not_silently_treated_as_international() -> None:
+    # A present venue with a name we don't recognize and no country at all should
+    # be reported as drift (loud), not silently classified as international (which
+    # `venue_drift()` ignores) - an unrecognized US venue must never go quiet just
+    # because ESPN happened to omit the country field.
+    payload = {
+        "events": [_event("BUF", "MIA", "2026-01-18T18:00Z", "Some New Stadium", venue_country="")],
+    }
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=payload))
+
+    games = get_todays_games(TARGET_DATE)
+
+    assert games[0].stadium is None
+    assert games[0].is_venue_drift is True
+    assert venue_drift(games) == [games[0].unresolved_reason]
 
 
 @respx.mock

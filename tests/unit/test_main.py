@@ -42,14 +42,18 @@ def _isolated_state_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("MESSY_WEATHER_STATE_DIR", str(tmp_path / "state"))
 
 
-def _event(home: str, away: str, venue_name: str) -> dict:
+def _event(home: str, away: str, venue_name: str, venue_country: str = "USA") -> dict:
     kickoff = "2026-01-18T18:00Z"
     return {
         "date": kickoff,
         "competitions": [
             {
                 "date": kickoff,
-                "venue": {"fullName": venue_name, "indoor": False},
+                "venue": {
+                    "fullName": venue_name,
+                    "indoor": False,
+                    "address": {"country": venue_country},
+                },
                 "competitors": [
                     {"homeAway": "home", "team": {"abbreviation": home}},
                     {"homeAway": "away", "team": {"abbreviation": away}},
@@ -72,7 +76,7 @@ def _covered_and_international_schedule() -> dict:
     return {
         "events": [
             _event("MIN", "DET", "U.S. Bank Stadium"),
-            _event("JAX", "PHI", "Tottenham Hotspur Stadium"),
+            _event("JAX", "PHI", "Tottenham Hotspur Stadium", venue_country="England"),
         ]
     }
 
