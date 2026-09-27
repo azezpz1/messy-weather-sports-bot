@@ -178,8 +178,12 @@ uv run pytest -m "not integration"  # unit tests only (no network)
 ```
 
 Integration tests hit the real ESPN and NWS APIs (no credentials needed) but
-never post to Bluesky — they use a console-printing poster instead. They run
-in CI on every push and pull request via GitHub Actions.
+never post to Bluesky — they use a console-printing poster instead. They're
+contract tests: they catch an upstream API change that the unit tests, which
+mock those APIs, can't. CI runs them on every push and pull request, in an
+`integration` job separate from the `test` job (lint, types, unit tests), so
+an upstream outage shows up as its own red check without failing `test`.
+Only `test` should be a required status check for merging.
 
 ### Releasing
 

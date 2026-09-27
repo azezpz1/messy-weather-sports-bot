@@ -33,8 +33,11 @@ jobs:
       - name: Type check
         run: uv run ty check
 
+      # Unit tests only: they mock every external API, so this job's result depends
+      # on the code alone - an ESPN or NWS hiccup can't block a pull request. The
+      # live-API tests run in the separate `integration` job below.
       - name: Test
-        run: uv run pytest --cov-report=xml
+        run: uv run pytest -m "not integration" --cov-report=xml
 
       - name: Upload coverage report
         if: always()
@@ -42,3 +45,27 @@ jobs:
         with:
           name: coverage-report
           path: coverage.xml
+
+  # Contract tests against the real ESPN and NWS APIs, catching upstream response
+  # changes the mocked unit tests can't. Kept out of the `test` job so a flaky or
+  # unexpected upstream response shows up here without failing that job; don't make
+  # this job a required status check.
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # --no-cov: a handful of tests on their own can't meet the suite-wide coverage
+      # floor, which the `test` job already enforces.
+      - name: Integration tests (live APIs)
+        run: uv run pytest -m integration --no-cov
