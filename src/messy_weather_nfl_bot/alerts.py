@@ -9,9 +9,9 @@ from enum import IntEnum
 import httpx
 
 from messy_weather_nfl_bot.retry import request_with_retry
-from messy_weather_nfl_bot.weather import GAME_DURATION, USER_AGENT
+from messy_weather_nfl_bot.weather import GAME_DURATION, USER_AGENT, nws_point
 
-ALERTS_URL = "https://api.weather.gov/alerts/active?point={lat},{lon}"
+ALERTS_URL = "https://api.weather.gov/alerts/active?point={point}"
 
 
 class AlertSeverity(IntEnum):
@@ -134,7 +134,7 @@ def get_active_alerts(
     http_client = client or httpx.Client(timeout=10.0, headers={"User-Agent": USER_AGENT})
 
     def _get() -> httpx.Response:
-        response = http_client.get(ALERTS_URL.format(lat=latitude, lon=longitude))
+        response = http_client.get(ALERTS_URL.format(point=nws_point(latitude, longitude)))
         response.raise_for_status()
         return response
 

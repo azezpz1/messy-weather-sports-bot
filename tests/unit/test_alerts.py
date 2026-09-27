@@ -220,3 +220,32 @@ def test_get_active_alerts_skips_a_feature_with_a_timezone_naive_timestamp() -> 
     alerts = get_active_alerts(LAT, LON, kickoff)
 
     assert [alert.event for alert in alerts] == ["Heat Advisory"]
+
+
+@respx.mock
+def test_get_active_alerts_rounds_an_over_precise_point() -> None:
+    # NWS only accepts 4 decimal places in a point - Highmark Stadium's coordinates, as
+    # stored in stadiums.py, have 5.
+    respx.get("https://api.weather.gov/alerts/active?point=42.77306,-78.79222").mock(
+        return_value=httpx.Response(301)
+    )
+    respx.get("https://api.weather.gov/alerts/active?point=42.7731,-78.7922").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "features": [
+                    {
+                        "properties": {
+                            "event": "Lake Effect Snow Warning",
+                            "onset": None,
+                            "ends": None,
+                        }
+                    }
+                ]
+            },
+        )
+    )
+
+    alerts = get_active_alerts(42.77306, -78.79222, dt.datetime(2026, 1, 18, 18, 0, tzinfo=dt.UTC))
+
+    assert [alert.event for alert in alerts] == ["Lake Effect Snow Warning"]
