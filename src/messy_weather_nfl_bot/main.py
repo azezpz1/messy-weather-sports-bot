@@ -119,6 +119,7 @@ def _log_run_summary(
     games_found: int | None,
     outdoor_count: int,
     evaluated_count: int,
+    messy_count: int,
     platforms_posted: list[str],
     thread_root: str | None,
 ) -> None:
@@ -126,10 +127,11 @@ def _log_run_summary(
     exit path from `run()` calls this, so the healthcheck completion body always
     carries a summary line."""
     logger.info(
-        "Run summary: %s game(s) found, %d outdoor, %d evaluated, platforms: %s%s",
+        "Run summary: %s game(s) found, %d outdoor, %d evaluated, %d messy, platforms: %s%s",
         "unavailable" if games_found is None else games_found,
         outdoor_count,
         evaluated_count,
+        messy_count,
         ", ".join(platforms_posted) or "none",
         f", thread: {thread_root}" if thread_root else "",
     )
@@ -155,7 +157,7 @@ def run(platform_names: list[str], dry_run: bool, force: bool = False) -> int:
         games = get_todays_games(date)
     except (httpx.HTTPError, ValueError) as exc:
         logger.error("Could not fetch today's NFL schedule: %s", exc)
-        _log_run_summary(None, 0, 0, [], None)
+        _log_run_summary(None, 0, 0, 0, [], None)
         return EXIT_NOTHING_POSTED
 
     evaluated: list[GameWeather] = []
@@ -194,26 +196,35 @@ def run(platform_names: list[str], dry_run: bool, force: bool = False) -> int:
         evaluated.append(gw)
         period_word = "period" if len(forecasts) == 1 else "periods"
         logger.info(
-            "%s %s — included: score %.1f (%s) across %d hourly %s",
+            "%s %s — %s: score %.1f (%s) across %d hourly %s",
             matchup,
             format_kickoff(game.kickoff),
+            "included" if gw.is_messy else "skipped: not messy",
             gw.score,
             _weather_detail(gw.weather),
             len(forecasts),
             period_word,
         )
 
+    messy = [gw for gw in evaluated if gw.is_messy]
+
     if outdoor_count == 0:
         logger.info("No outdoor NFL games on %s; nothing to post.", date.isoformat())
-        _log_run_summary(len(games), outdoor_count, len(evaluated), [], None)
+        _log_run_summary(len(games), outdoor_count, len(evaluated), len(messy), [], None)
         return EXIT_OK
 
     if not evaluated:
         logger.error("Forecast unavailable for every outdoor game today; nothing to post.")
-        _log_run_summary(len(games), outdoor_count, len(evaluated), [], None)
+        _log_run_summary(len(games), outdoor_count, len(evaluated), len(messy), [], None)
         return EXIT_NOTHING_POSTED
 
-    ranked = sort_by_messiness(evaluated)
+    if not messy:
+        logger.info("No messy-weather games on %s; nothing to post.", date.isoformat())
+        _log_run_summary(len(games), outdoor_count, len(evaluated), len(messy), [], None)
+        # A game whose forecast couldn't be fetched might have been the messy one.
+        return EXIT_PARTIAL if games_missing else EXIT_OK
+
+    ranked = sort_by_messiness(messy)
     post_texts = build_post_texts(ranked, date)
     posters = build_posters(platform_names, dry_run)
 
@@ -270,7 +281,9 @@ def run(platform_names: list[str], dry_run: bool, force: bool = False) -> int:
     else:
         exit_code = EXIT_OK
 
-    _log_run_summary(len(games), outdoor_count, len(evaluated), platforms_posted, thread_root)
+    _log_run_summary(
+        len(games), outdoor_count, len(evaluated), len(messy), platforms_posted, thread_root
+    )
     return exit_code
 
 

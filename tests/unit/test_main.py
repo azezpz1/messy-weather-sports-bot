@@ -106,10 +106,23 @@ def _clear_period_response() -> httpx.Response:
     return httpx.Response(200, json={"properties": {"periods": [period]}})
 
 
+def _rainy_period_response() -> httpx.Response:
+    period = {
+        "startTime": "2026-01-18T13:00:00-05:00",
+        "endTime": "2026-01-18T18:30:00-05:00",
+        "isDaytime": True,
+        "shortForecast": "Rain",
+        "temperature": 40,
+        "windSpeed": "5 mph",
+        "probabilityOfPrecipitation": {"value": 90},
+    }
+    return httpx.Response(200, json={"properties": {"periods": [period]}})
+
+
 @respx.mock
 def test_one_failing_stadium_still_posts_the_other_games(capsys: pytest.CaptureFixture) -> None:
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
     # BUF's forecast is persistently broken - api.weather.gov's real-world 500s.
     _mock_hourly_forecast(BUF_LAT, BUF_LON, response=httpx.Response(500))
 
@@ -144,8 +157,8 @@ def test_espn_failure_returns_nothing_posted() -> None:
 @respx.mock
 def test_all_games_succeed_returns_ok() -> None:
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
 
     exit_code = run(platform_names=[], dry_run=True)
 
@@ -155,8 +168,8 @@ def test_all_games_succeed_returns_ok() -> None:
 @respx.mock
 def test_an_active_warning_appears_on_the_game_line(capsys: pytest.CaptureFixture) -> None:
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
     # Override GB's default "no active alerts" mock with an active, overlapping warning.
     respx.get(f"https://api.weather.gov/alerts/active?point={GB_LAT},{GB_LON}").mock(
         return_value=httpx.Response(
@@ -185,8 +198,8 @@ def test_an_active_warning_appears_on_the_game_line(capsys: pytest.CaptureFixtur
 @respx.mock
 def test_a_failed_alert_lookup_does_not_skip_the_game(capsys: pytest.CaptureFixture) -> None:
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
     # GB's alert lookup is persistently broken - the game must still post, with no alert.
     respx.get(f"https://api.weather.gov/alerts/active?point={GB_LAT},{GB_LON}").mock(
         return_value=httpx.Response(500)
@@ -228,8 +241,8 @@ def test_one_poster_failing_still_lets_the_others_post(
         lambda platform_names, dry_run: [BrokenPoster(), RecordingPoster()],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
 
     exit_code = run(platform_names=["bluesky"], dry_run=False)
 
@@ -264,8 +277,8 @@ def test_a_partially_posted_thread_is_partial_not_nothing_posted(
         lambda ranked, date: ["root post", "reply post"],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
 
     exit_code = run(platform_names=["bluesky"], dry_run=False)
 
@@ -293,7 +306,7 @@ def test_forecast_unavailable_is_logged_as_a_skip_reason(
 ) -> None:
     caplog.set_level(logging.INFO, logger=LOGGER_NAME)
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
     _mock_hourly_forecast(BUF_LAT, BUF_LON, response=httpx.Response(500))
 
     exit_code = run(platform_names=[], dry_run=True)
@@ -306,27 +319,81 @@ def test_forecast_unavailable_is_logged_as_a_skip_reason(
 def test_included_game_logs_score_and_weather_detail(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO, logger=LOGGER_NAME)
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
 
     run(platform_names=[], dry_run=True)
 
     assert "CHI @ GB" in caplog.text
     assert "included: score" in caplog.text
-    assert "Sunny, 40°F, 5mph" in caplog.text
+    assert "Rain, 40°F, 5mph" in caplog.text
     assert "1 hourly period" in caplog.text
+
+
+@respx.mock
+def test_nice_weather_games_are_left_out_of_the_post(
+    capsys: pytest.CaptureFixture, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Regression for 2026-09-27: every outdoor game was posted, sunny ones included.
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    out = capsys.readouterr().out
+    assert exit_code == EXIT_OK
+    assert "CHI @ GB" in out
+    assert "NE @ BUF" not in out
+    assert "NE @ BUF 1:00pm ET — skipped: not messy" in caplog.text
+    assert "Run summary: 2 game(s) found, 2 outdoor, 2 evaluated, 1 messy" in caplog.text
+
+
+@respx.mock
+def test_a_day_with_no_messy_games_posts_nothing_and_is_ok(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+
+    def _no_posters(platform_names, dry_run):
+        raise AssertionError("nothing should be posted on a nice-weather day")
+
+    monkeypatch.setattr("messy_weather_nfl_bot.main.build_posters", _no_posters)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+
+    exit_code = run(platform_names=["bluesky"], dry_run=False)
+
+    assert exit_code == EXIT_OK
+    assert "No messy-weather games" in caplog.text
+    assert "Run summary: 2 game(s) found, 2 outdoor, 2 evaluated, 0 messy" in caplog.text
+
+
+@respx.mock
+def test_no_messy_games_with_a_missing_forecast_is_partial() -> None:
+    # The game whose forecast couldn't be fetched might have been the messy one, so an
+    # empty day with a gap in the data is degraded, not clean.
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=httpx.Response(500))
+
+    exit_code = run(platform_names=[], dry_run=True)
+
+    assert exit_code == EXIT_PARTIAL
 
 
 @respx.mock
 def test_run_summary_is_logged(caplog: pytest.LogCaptureFixture) -> None:
     caplog.set_level(logging.INFO, logger=LOGGER_NAME)
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
 
     run(platform_names=[], dry_run=True)
 
-    assert "Run summary: 2 game(s) found, 2 outdoor, 2 evaluated" in caplog.text
+    assert "Run summary: 2 game(s) found, 2 outdoor, 2 evaluated, 2 messy" in caplog.text
 
 
 @respx.mock
@@ -339,7 +406,7 @@ def test_run_summary_is_logged_even_when_no_outdoor_games(
     exit_code = run(platform_names=[], dry_run=True)
 
     assert exit_code == EXIT_OK
-    assert "Run summary: 0 game(s) found, 0 outdoor, 0 evaluated" in caplog.text
+    assert "Run summary: 0 game(s) found, 0 outdoor, 0 evaluated, 0 messy" in caplog.text
 
 
 @respx.mock
@@ -354,7 +421,7 @@ def test_run_summary_is_logged_even_when_every_forecast_fails(
     exit_code = run(platform_names=[], dry_run=True)
 
     assert exit_code == EXIT_NOTHING_POSTED
-    assert "Run summary: 2 game(s) found, 2 outdoor, 0 evaluated" in caplog.text
+    assert "Run summary: 2 game(s) found, 2 outdoor, 0 evaluated, 0 messy" in caplog.text
 
 
 @respx.mock
@@ -464,7 +531,7 @@ def test_run_summary_is_logged_even_when_the_schedule_fetch_fails(
     exit_code = run(platform_names=[], dry_run=True)
 
     assert exit_code == EXIT_NOTHING_POSTED
-    assert "Run summary: unavailable game(s) found, 0 outdoor, 0 evaluated" in caplog.text
+    assert "Run summary: unavailable game(s) found, 0 outdoor, 0 evaluated, 0 messy" in caplog.text
 
 
 @respx.mock
@@ -489,8 +556,8 @@ def test_running_twice_posts_once_and_the_second_run_skips(
         lambda platform_names, dry_run: [RecordingPoster()],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
     caplog.set_level(logging.INFO, logger=LOGGER_NAME)
 
     first_exit = run(platform_names=["bluesky"], dry_run=False)
@@ -525,8 +592,8 @@ def test_force_reposts_even_though_todays_thread_already_finished(
         lambda platform_names, dry_run: [RecordingPoster()],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
 
     run(platform_names=["bluesky"], dry_run=False)
     calls_after_first_run = post_calls["count"]
@@ -573,8 +640,8 @@ def test_a_partial_thread_resumes_from_the_last_successful_post_on_rerun(
         lambda ranked, date: ["root post", "reply 1", "reply 2"],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
 
     first_exit = run(platform_names=["bluesky"], dry_run=False)
     assert first_exit == EXIT_PARTIAL
@@ -590,8 +657,8 @@ def test_a_partial_thread_resumes_from_the_last_successful_post_on_rerun(
 @respx.mock
 def test_dry_run_never_reads_or_writes_state(tmp_path) -> None:
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
 
     run(platform_names=[], dry_run=True)
     run(platform_names=[], dry_run=True)
@@ -625,8 +692,8 @@ def test_a_state_write_failure_does_not_change_the_posting_outcome(
 
     monkeypatch.setattr("messy_weather_nfl_bot.state.DayState.record", _broken_record)
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
     caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
 
     exit_code = run(platform_names=["bluesky"], dry_run=False)
@@ -665,8 +732,8 @@ def test_a_state_write_failure_after_a_partial_thread_does_not_escape_run(
 
     monkeypatch.setattr("messy_weather_nfl_bot.state.DayState.record", _broken_record)
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
-    _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
-    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
     caplog.set_level(logging.WARNING, logger=LOGGER_NAME)
 
     exit_code = run(platform_names=["bluesky"], dry_run=False)

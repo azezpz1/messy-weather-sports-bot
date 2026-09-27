@@ -4,11 +4,31 @@ A bot to post messy NFL weather games to various social media sites
 
 On the morning of NFL game days, this bot checks the forecast — and any active
 National Weather Service alerts (Winter Storm Warning, Wind Advisory, etc.) —
-for every outdoor stadium hosting a game that day, ranks them by how messy the
-weather looks (snow first, then by a combined score of wind, precipitation
-odds, temperature extremes, and alert severity), and posts a weather report —
-currently to [Bluesky](https://bsky.app), with a clean abstraction to add more
-platforms later.
+for every outdoor stadium hosting a game that day, and posts the games worth
+watching *because* the weather will be messy — currently to
+[Bluesky](https://bsky.app), with a clean abstraction to add more platforms
+later. It's not a weather report: nice-weather games are left out entirely,
+and on a day with no messy games, nothing is posted.
+
+A game counts as messy if, at any hour between kickoff and the final whistle,
+the forecast shows:
+
+| Condition     | Threshold                                           |
+| ------------- | --------------------------------------------------- |
+| Snow          | snow, sleet, flurries, etc. with a ≥30% chance       |
+| Thunderstorms | ≥50% chance                                          |
+| Rain          | rain, showers, or drizzle with a ≥50% chance         |
+| Fog           | fog, mist, or haze in the forecast                   |
+| Wind          | ≥20 mph sustained                                    |
+| Cold / heat   | ≤32°F or ≥95°F                                       |
+
+So a "Slight Chance Rain Showers" (NWS's wording for 15–24%) sunny afternoon
+doesn't make the cut. An NWS alert on its own doesn't either — alerts for a
+stadium's location include things like Small Craft Advisories — but an active
+alert does push an already-messy game up the ranking and is shown on its line.
+Messy games are ranked snow first, then by a combined score of wind,
+precipitation odds, temperature extremes, and alert severity. The thresholds
+live at the top of `src/messy_weather_nfl_bot/messiness.py`.
 
 Games in domed, fixed-roof, or retractable-roof stadiums are skipped, since
 roof status isn't reliably knowable ahead of time. If there are no outdoor
@@ -57,8 +77,9 @@ uv run messy-weather-nfl-bot --force
 ```
 
 Every run logs why each game found for the day was included or skipped (a
-covered stadium, an international venue, an unrecognized venue, or a forecast
-that couldn't be fetched), followed by a one-line summary. Logs go to stderr
+covered stadium, an international venue, an unrecognized venue, a forecast
+that couldn't be fetched, or weather that isn't messy), followed by a
+one-line summary. Logs go to stderr
 with timestamps, so they're readable from cron/journald logs.
 
 ### Avoiding duplicate posts
@@ -102,8 +123,8 @@ To set it up:
 With `HEALTHCHECK_URL` set, the bot pings `{url}/start` when a run begins and
 `{url}/{exit_code}` when it ends (carrying the run summary and log tail as
 the ping body) — `0` means success, anything else is a failure, reusing this
-bot's own exit codes. Days with no outdoor games still ping success, so they
-don't look like a missed run. A failed ping is logged but never affects the
+bot's own exit codes. Days with no outdoor games, or no messy ones, still
+ping success, so they don't look like a missed run. A failed ping is logged but never affects the
 run's outcome — the bot doesn't need `HEALTHCHECK_URL` set at all, and
 nothing is pinged if it's unset.
 
