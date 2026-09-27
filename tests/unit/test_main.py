@@ -20,7 +20,7 @@ from messy_weather_nfl_bot.schedule import SCOREBOARD_URL
 LOGGER_NAME = "messy_weather_nfl_bot"
 
 GB_LAT, GB_LON = 44.5013, -88.0622
-BUF_LAT, BUF_LON = 42.7738, -78.7870
+BUF_LAT, BUF_LON = 42.77306, -78.79222
 TARGET_DATE = dt.date(2026, 1, 18)
 
 
@@ -42,14 +42,18 @@ def _isolated_state_dir(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("MESSY_WEATHER_STATE_DIR", str(tmp_path / "state"))
 
 
-def _event(home: str, away: str, venue_name: str) -> dict:
+def _event(home: str, away: str, venue_name: str, venue_country: str = "USA") -> dict:
     kickoff = "2026-01-18T18:00Z"
     return {
         "date": kickoff,
         "competitions": [
             {
                 "date": kickoff,
-                "venue": {"fullName": venue_name, "indoor": False},
+                "venue": {
+                    "fullName": venue_name,
+                    "indoor": False,
+                    "address": {"country": venue_country},
+                },
                 "competitors": [
                     {"homeAway": "home", "team": {"abbreviation": home}},
                     {"homeAway": "away", "team": {"abbreviation": away}},
@@ -72,7 +76,7 @@ def _covered_and_international_schedule() -> dict:
     return {
         "events": [
             _event("MIN", "DET", "U.S. Bank Stadium"),
-            _event("JAX", "PHI", "Tottenham Hotspur Stadium"),
+            _event("JAX", "PHI", "Tottenham Hotspur Stadium", venue_country="England"),
         ]
     }
 
@@ -280,10 +284,7 @@ def test_skipped_games_log_their_reason(caplog: pytest.LogCaptureFixture) -> Non
 
     assert exit_code == EXIT_OK  # no outdoor games today at all
     assert "DET @ MIN — skipped: covered stadium (U.S. Bank Stadium)" in caplog.text
-    assert (
-        'PHI @ JAX — skipped: international/neutral-site venue "Tottenham Hotspur Stadium"'
-        in caplog.text
-    )
+    assert 'PHI @ JAX — skipped: international venue "Tottenham Hotspur Stadium"' in caplog.text
 
 
 @respx.mock
