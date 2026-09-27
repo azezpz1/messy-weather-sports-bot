@@ -16,6 +16,7 @@ from messy_weather_nfl_bot.main import (
     run,
 )
 from messy_weather_nfl_bot.schedule import SCOREBOARD_URL
+from messy_weather_nfl_bot.weather import nws_point
 
 LOGGER_NAME = "messy_weather_nfl_bot"
 
@@ -82,13 +83,16 @@ def _covered_and_international_schedule() -> dict:
 
 
 def _mock_hourly_forecast(lat: float, lon: float, *, response: httpx.Response) -> None:
+    # Mock the point as the bot actually requests it (rounded to what NWS accepts), not
+    # the raw stadium coordinates - see test_weather's over-precise point regression test.
+    point = nws_point(lat, lon)
     hourly_url = f"https://api.weather.gov/gridpoints/MOCK-{lat}-{lon}/forecast/hourly"
-    respx.get(f"https://api.weather.gov/points/{lat},{lon}").mock(
+    respx.get(f"https://api.weather.gov/points/{point}").mock(
         return_value=httpx.Response(200, json={"properties": {"forecastHourly": hourly_url}})
     )
     respx.get(hourly_url).mock(return_value=response)
     # No active alerts by default - individual tests override this route for alert cases.
-    respx.get(f"https://api.weather.gov/alerts/active?point={lat},{lon}").mock(
+    respx.get(f"https://api.weather.gov/alerts/active?point={point}").mock(
         return_value=httpx.Response(200, json={"features": []})
     )
 
