@@ -6,27 +6,12 @@ See `README.md` for user-facing docs; this file is about *working on* the repo.
 
 ## Before every push
 
-Run `./scripts/check.sh` (or `./scripts/check.sh -m "not integration"` if you
-have no network access). It runs the exact same steps as CI:
-
-```sh
-uv run ruff check .
-uv run ruff format --check .
-uv run ty check
-uv run pytest
-```
-
-Do this even for small changes. A large fraction of this repo's PR history is
-follow-up commits fixing things CI or CodeRabbit caught after the fact
-(`ruff format` violations, a `ty` type error left by a refactor, CodeQL
-findings) — all of which `scripts/check.sh` catches locally before a push,
-with no review round-trip needed. If `pre-commit` is installed with
-`--hook-type pre-push` this runs automatically; don't rely on that alone if
-you're not certain it's installed in your session.
-
-Coverage must stay ≥80% (`pyproject.toml`'s `fail_under`). Integration tests
-hit real ESPN/NWS APIs (no credentials, never posts to Bluesky) — expect them
-to fail without network, not because of your change.
+Run `./scripts/check.sh` (see README's "Development" section for the
+commands it runs and the network-free variant) — even for small changes.
+A large fraction of this repo's PR history is follow-up commits fixing
+things CI or CodeRabbit caught after the fact, all of which this script
+catches locally with no review round-trip needed. Don't rely on the
+pre-push git hook alone unless you're sure it's installed in your session.
 
 ## Patterns that have bitten this repo before
 
@@ -58,14 +43,8 @@ history — check for these explicitly in anything you touch:
   "Releasing" section — don't rediscover it, and don't try to "fix" it by
   changing token permissions without reading that section first.
 
-## Review expectations
-
-CodeRabbit runs on every PR (`.coderabbit.yaml`, `assertive` profile,
-docstring checks disabled). Assume it will flag: retry/backoff edge cases,
-partial-failure handling (e.g. a thread half-posted, one failed API call
-sinking a whole run), and malformed/missing external data. Handle these
-proactively in the initial implementation rather than in a follow-up
-"address review findings" commit.
+CodeRabbit reviews every PR (`.coderabbit.yaml`, `assertive` profile) — treat
+its findings as a first pass to get ahead of, not a follow-up to react to.
 
 ## Branch hygiene
 
