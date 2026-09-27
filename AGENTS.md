@@ -1,8 +1,30 @@
 # Agent notes for this repo
 
-Posts messy NFL game-day weather to Bluesky. Python (`uv`-managed), source in
+Recommends NFL games worth watching because the weather will be messy, and
+posts them to Bluesky. Python (`uv`-managed), source in
 `src/messy_weather_nfl_bot/`, tests in `tests/unit/` and `tests/integration/`.
 See `README.md` for user-facing docs; this file is about *working on* the repo.
+
+## What this app is for
+
+This is a **recommendation engine for messy games to watch, not a weather
+report.** Each post tells followers "you should watch this game, because it's
+going to be messy." That's the whole point of the app, and it should guide
+every change to what gets posted:
+
+- **Leave nice-weather games out.** Don't add them back for completeness, as
+  context, or as a "not messy" section. A game appears only if it's messy
+  (`GameWeather.is_messy`, with thresholds at the top of `messiness.py`).
+- **Posting nothing is a valid outcome.** A day with no messy games gets no
+  post and exits cleanly. Don't "fix" that by lowering thresholds or posting a
+  fallback.
+- **When tuning thresholds, err toward fewer, better recommendations.** The
+  bar is "would a follower tune in for the weather?", not "is there any
+  weather to mention?" A "Slight Chance Rain Showers" afternoon or a sunny
+  15 mph breeze doesn't clear it. This was a real bug: on 2026-09-27 the bot
+  posted a three-post thread of mostly sunny games.
+- **Word posts as recommendations** ("Messy NFL games to watch"), never as a
+  forecast or weather report.
 
 ## Before every push
 

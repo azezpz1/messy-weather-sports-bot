@@ -1,14 +1,21 @@
 # messy-weather-sports-bot
 
-A bot to post messy NFL weather games to various social media sites
+A recommendation engine for NFL games worth watching because the weather is
+going to make them messy — snow games, sideways rain, wind that turns every
+field goal into an adventure — posted to social media.
 
-On the morning of NFL game days, this bot checks the forecast — and any active
+**This is not a sports weather report.** Every post should tell followers
+*"you should watch this game, because it's going to be messy."* A game with
+nice weather isn't a recommendation, so it never appears in a post, and a day
+with no messy games gets no post at all. Silence on a sunny Sunday is the bot
+working as intended. When changing what gets posted, the test is: would a
+follower tune in to this game for the weather? If not, it doesn't belong.
+
+On the morning of NFL game days, the bot checks the forecast — and any active
 National Weather Service alerts (Winter Storm Warning, Wind Advisory, etc.) —
-for every outdoor stadium hosting a game that day, and posts the games worth
-watching *because* the weather will be messy — currently to
-[Bluesky](https://bsky.app), with a clean abstraction to add more platforms
-later. It's not a weather report: nice-weather games are left out entirely,
-and on a day with no messy games, nothing is posted.
+for every outdoor stadium hosting a game that day, picks out the messy ones,
+and posts them — currently to [Bluesky](https://bsky.app), with a clean
+abstraction to add more platforms later.
 
 A game counts as messy if, at any hour between kickoff and the final whistle,
 the forecast shows:
