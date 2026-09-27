@@ -40,7 +40,7 @@ def format_game_line(gw: GameWeather) -> str:
 
 
 def format_header(date: dt.date, *, has_warning: bool = False) -> str:
-    header = f"\U0001f329️ NFL Weather Report — {date:%a %b} {date.day}"
+    header = f"\U0001f329️ Messy NFL games to watch — {date:%a %b} {date.day}"
     if has_warning:
         header += " ⚠️ Alerts in effect"
     return header

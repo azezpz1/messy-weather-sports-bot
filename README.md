@@ -1,14 +1,43 @@
 # messy-weather-sports-bot
 
-A bot to post messy NFL weather games to various social media sites
+A recommendation engine for NFL games worth watching because the weather is
+going to make them messy — snow games, sideways rain, wind that turns every
+field goal into an adventure — posted to social media.
 
-On the morning of NFL game days, this bot checks the forecast — and any active
+**This is not a sports weather report.** Every post should tell followers
+*"you should watch this game, because it's going to be messy."* A game with
+nice weather isn't a recommendation, so it never appears in a post, and a day
+with no messy games gets no post at all. Silence on a sunny Sunday is the bot
+working as intended. When changing what gets posted, the test is: would a
+follower tune in to this game for the weather? If not, it doesn't belong.
+
+On the morning of NFL game days, the bot checks the forecast — and any active
 National Weather Service alerts (Winter Storm Warning, Wind Advisory, etc.) —
-for every outdoor stadium hosting a game that day, ranks them by how messy the
-weather looks (snow first, then by a combined score of wind, precipitation
-odds, temperature extremes, and alert severity), and posts a weather report —
-currently to [Bluesky](https://bsky.app), with a clean abstraction to add more
-platforms later.
+for every outdoor stadium hosting a game that day, picks out the messy ones,
+and posts them — currently to [Bluesky](https://bsky.app), with a clean
+abstraction to add more platforms later.
+
+A game counts as messy if, at any hour between kickoff and the final whistle,
+the forecast shows:
+
+| Condition     | Threshold                                           |
+| ------------- | --------------------------------------------------- |
+| Snow          | snow, sleet, flurries, etc. with a ≥30% chance       |
+| Thunderstorms | ≥50% chance                                          |
+| Rain          | rain, showers, or drizzle with a ≥50% chance         |
+| Fog           | fog, mist, or haze in the forecast                   |
+| Wind          | ≥20 mph sustained                                    |
+| Cold / heat   | ≤32°F or ≥95°F                                       |
+
+So a "Slight Chance Rain Showers" (NWS's wording for 15–24%) sunny afternoon
+doesn't make the cut. An NWS alert on its own doesn't either — alerts for a
+stadium's location include things like Small Craft Advisories — but an active
+alert does push an already-messy game up the ranking and is shown on its line.
+If NWS reports no precipitation odds for an hour at all, the forecast text is
+taken at its word - "Rain" with no reported odds still counts as rain.
+Messy games are ranked snow first, then by a combined score of wind,
+precipitation odds, temperature extremes, and alert severity. The thresholds
+live at the top of `src/messy_weather_nfl_bot/messiness.py`.
 
 Games in domed, fixed-roof, or retractable-roof stadiums are skipped, since
 roof status isn't reliably knowable ahead of time. If there are no outdoor
@@ -72,9 +101,9 @@ uv run messy-weather-nfl-bot --force
 Every run starts by logging the installed version (e.g.
 `messy-weather-nfl-bot 2.0.1 starting`), so a log - or a Healthchecks.io ping
 body - always says which release produced it. It then logs why each game found
-for the day was included or skipped (a
-covered stadium, an international venue, an unrecognized venue, or a forecast
-that couldn't be fetched), followed by a one-line summary. Logs go to stderr
+for the day was included or skipped (a covered stadium, an international venue,
+an unrecognized venue, a forecast that couldn't be fetched, or weather that
+isn't messy), followed by a one-line summary. Logs go to stderr
 with timestamps, so they're readable from cron/journald logs.
 
 ### Avoiding duplicate posts
@@ -118,8 +147,12 @@ To set it up:
 With `HEALTHCHECK_URL` set, the bot pings `{url}/start` when a run begins and
 `{url}/{exit_code}` when it ends (carrying the run summary and log tail as
 the ping body) — `0` means success, anything else is a failure, reusing this
-bot's own exit codes. Days with no outdoor games still ping success, so they
-don't look like a missed run. A failed ping is logged but never affects the
+bot's own exit codes. Days with no outdoor games, or no messy ones, still
+ping success, so they don't look like a missed run. The exception is a day
+where a game's forecast couldn't be fetched: if none of the games that could be
+checked are messy, it exits `2` (partial), since the missing game might have
+been the messy one - and if every outdoor game's forecast failed, it exits `1`
+(nothing posted). A failed ping is logged but never affects the
 run's outcome — the bot doesn't need `HEALTHCHECK_URL` set at all, and
 nothing is pinged if it's unset.
 

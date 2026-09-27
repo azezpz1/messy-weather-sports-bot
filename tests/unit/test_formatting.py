@@ -101,7 +101,7 @@ def test_build_post_texts_truncates_an_oversized_single_line_and_keeps_header() 
     assert len(texts) == 1
     assert len(texts[0]) <= 280
     # the header (not just the truncated game line) is still present - never a header-only post
-    assert "NFL Weather Report" in texts[0]
+    assert "games to watch" in texts[0]
     assert "GB" in texts[0]
 
 
@@ -121,6 +121,12 @@ def test_format_game_line_omits_alert_text_when_there_is_no_active_alert() -> No
     assert "Warning" not in line
     assert "Watch" not in line
     assert "Advisory" not in line
+
+
+def test_format_header_pitches_games_to_watch_not_a_weather_report() -> None:
+    header = format_header(GAME_DATE)
+    assert "Messy NFL games to watch" in header
+    assert "Weather Report" not in header
 
 
 def test_format_header_omits_alert_mention_by_default() -> None:
