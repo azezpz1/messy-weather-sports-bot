@@ -1,6 +1,6 @@
 [project]
 name = "messy-weather-nfl-bot"
-version = "2.0.3"
+version = "2.0.4"
 description = "Posts messy NFL game-day weather to social media"
 authors = [
     { name = "Anthony Panettiere" }
