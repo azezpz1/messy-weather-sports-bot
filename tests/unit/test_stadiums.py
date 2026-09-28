@@ -44,12 +44,14 @@ def test_production_venue_id_resolves_a_renamed_venue_without_an_alias() -> None
     assert stadium_for_venue("3752", "Some Future Sponsor Field") is pit
 
 
-def test_houston_resolves_under_espns_legacy_reliant_stadium_name() -> None:
-    # ESPN still reports NRG Stadium as "Reliant Stadium" (venue id 3891); the
-    # weekly venue-drift check flagged it on 2026-09-28.
+def test_houston_resolves_under_both_reliant_and_nrg_names() -> None:
+    # The stadium went back from NRG Stadium to Reliant Stadium in August 2026
+    # (ESPN venue id 3891); the weekly venue-drift check flagged it on 2026-09-28.
     hou = stadium_for_team("HOU")
+    assert hou.name == "Reliant Stadium"
     assert stadium_for_venue("3891", "Reliant Stadium") is hou
     assert stadium_for_venue("", "Reliant Stadium") is hou
+    assert stadium_for_venue("", "NRG Stadium") is hou
 
 
 def test_stadium_for_venue_matches_by_id_even_with_unknown_name(
