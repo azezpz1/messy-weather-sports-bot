@@ -4,6 +4,14 @@ on:
   schedule:
     # Every Monday at 12:00 UTC, during the NFL season (Sept through early Feb).
     - cron: "0 12 * 9-12,1-2 1"
+  # Also run when the venue table or the check itself changes, so a bad edit to
+  # either is caught before merge. Path-filtered so unrelated PRs don't depend
+  # on ESPN being reachable (see the note on unit tests in ci.yml).
+  pull_request:
+    paths:
+      - src/messy_weather_nfl_bot/stadiums.py
+      - scripts/check_venue_drift.py
+      - .github/workflows/venue-drift-check.yml
   workflow_dispatch: {}
 
 permissions:

@@ -58,7 +58,14 @@ STADIUMS: dict[str, StadiumInfo] = {
     ),
     "DET": StadiumInfo("Ford Field", 42.3400, -83.0456, is_covered=True, venue_id="3727"),
     "GB": StadiumInfo("Lambeau Field", 44.5013, -88.0622, is_covered=False),
-    "HOU": StadiumInfo("NRG Stadium", 29.6847, -95.4107, is_covered=True),
+    "HOU": StadiumInfo(
+        "Reliant Stadium",
+        29.6847,
+        -95.4107,
+        is_covered=True,
+        venue_id="3891",
+        aliases=("NRG Stadium",),
+    ),
     "IND": StadiumInfo("Lucas Oil Stadium", 39.7601, -86.1639, is_covered=True, venue_id="3812"),
     "JAX": StadiumInfo(
         "EverBank Stadium",

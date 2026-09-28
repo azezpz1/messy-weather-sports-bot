@@ -268,7 +268,9 @@ rather than silently dropped.
 The "Venue drift check" workflow (`.github/workflows/venue-drift-check.yml`)
 runs weekly during the season and fails if any upcoming US game's venue
 isn't recognized, so a stadium rename or relocation is caught before it
-quietly drops a team's home games. Run it locally with:
+quietly drops a team's home games. It also runs on pull requests that touch
+`stadiums.py`, the check script, or the workflow file itself. Run it locally
+with:
 
 ```sh
 uv run python scripts/check_venue_drift.py
