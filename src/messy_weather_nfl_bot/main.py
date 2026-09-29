@@ -8,6 +8,7 @@ import importlib.metadata
 import io
 import logging
 import os
+import re
 import sys
 from collections.abc import Sequence
 
@@ -35,9 +36,14 @@ EXIT_OK = 0
 EXIT_NOTHING_POSTED = 1
 EXIT_PARTIAL = 2
 
+_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
 
 def _parse_date(value: str) -> dt.date:
+    # fromisoformat also accepts compact ("20261004") and ISO week dates on 3.11+.
     try:
+        if not _DATE_RE.fullmatch(value):
+            raise ValueError(value)
         return dt.date.fromisoformat(value)
     except ValueError:
         raise argparse.ArgumentTypeError(f"invalid date {value!r}: expected YYYY-MM-DD") from None

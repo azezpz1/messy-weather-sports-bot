@@ -841,20 +841,33 @@ def test_date_flag_parses_and_defaults_to_none() -> None:
 
 
 def test_date_flag_rejects_a_malformed_date() -> None:
-    with pytest.raises(SystemExit):
-        parse_args(["--date", "10/04/2026"])
+    for bad in ["10/04/2026", "20261004", "2026-W41-7", "2026-02-30"]:
+        with pytest.raises(SystemExit):
+            parse_args(["--date", bad])
 
 
 @respx.mock
-def test_another_date_is_forced_to_dry_run(caplog: pytest.LogCaptureFixture) -> None:
+def test_another_date_is_forced_to_dry_run(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
     caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    # "Today" is a different day from the (mocked) game day being previewed.
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.todays_local_date",
+        lambda: TARGET_DATE + dt.timedelta(days=1),
+    )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
     _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
     _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
+    dry_run_seen: list[bool] = []
 
-    # platform_names=["bluesky"] with dry_run=False would fail on missing credentials
-    # if the run were not forced to a dry run.
-    exit_code = run(platform_names=["bluesky"], dry_run=False, date=dt.date(2030, 1, 6))
+    def _capture_posters(platform_names: list[str], dry_run: bool) -> list:
+        dry_run_seen.append(dry_run)
+        return []
 
-    assert exit_code == EXIT_OK
+    monkeypatch.setattr("messy_weather_nfl_bot.main.build_posters", _capture_posters)
+
+    run(platform_names=["bluesky"], dry_run=False, date=TARGET_DATE)
+
+    assert dry_run_seen == [True]
     assert "forcing --dry-run" in caplog.text
