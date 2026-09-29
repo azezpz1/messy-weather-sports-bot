@@ -58,8 +58,11 @@ def _parse_wind_speed_mph(wind_speed: str) -> float:
 
 
 def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime) -> list[dict]:
-    """Return every forecast period overlapping [start, end), falling back to the soonest
-    daytime period (then the first period) if none overlap at all."""
+    """Return every forecast period overlapping [start, end).
+
+    Raises ValueError if none overlap - a game past the end of the forecast (~7 days
+    out) or already over. Substituting an unrelated period would report current weather
+    as the game's forecast, so callers treat it as "forecast not available"."""
     if not periods:
         raise ValueError("NWS returned no forecast periods")
     covering = [
@@ -68,12 +71,12 @@ def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime
         if dt.datetime.fromisoformat(period["startTime"]) < end
         and dt.datetime.fromisoformat(period["endTime"]) > start
     ]
-    if covering:
-        return covering
-    for period in periods:
-        if period.get("isDaytime"):
-            return [period]
-    return [periods[0]]
+    if not covering:
+        raise ValueError(
+            f"no forecast period covers the game window {start.isoformat()} to "
+            f"{end.isoformat()} (forecast not available yet, or the game is over)"
+        )
+    return covering
 
 
 def _forecast_hourly_url(points_payload: object) -> str:

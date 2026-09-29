@@ -487,7 +487,7 @@ def test_an_unhandled_exception_still_sends_a_failure_ping(
     )
     monkeypatch.setattr(
         "messy_weather_nfl_bot.main.run",
-        lambda platform_names, dry_run, force: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda platform_names, dry_run, force, date: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
     with pytest.raises(RuntimeError, match="boom"):
@@ -537,7 +537,7 @@ def test_the_failure_ping_after_a_crash_includes_the_running_version(
     )
     monkeypatch.setattr(
         "messy_weather_nfl_bot.main.run",
-        lambda platform_names, dry_run, force: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda platform_names, dry_run, force, date: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
     with pytest.raises(RuntimeError, match="boom"):
@@ -833,3 +833,28 @@ def test_quiet_mode_still_captures_the_run_summary_for_the_healthcheck_body(
 
     assert exit_code == EXIT_OK
     assert b"Run summary" in end_route.calls.last.request.content
+
+
+def test_date_flag_parses_and_defaults_to_none() -> None:
+    assert parse_args([]).date is None
+    assert parse_args(["--date", "2026-10-04"]).date == dt.date(2026, 10, 4)
+
+
+def test_date_flag_rejects_a_malformed_date() -> None:
+    with pytest.raises(SystemExit):
+        parse_args(["--date", "10/04/2026"])
+
+
+@respx.mock
+def test_another_date_is_forced_to_dry_run(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
+
+    # platform_names=["bluesky"] with dry_run=False would fail on missing credentials
+    # if the run were not forced to a dry run.
+    exit_code = run(platform_names=["bluesky"], dry_run=False, date=dt.date(2030, 1, 6))
+
+    assert exit_code == EXIT_OK
+    assert "forcing --dry-run" in caplog.text

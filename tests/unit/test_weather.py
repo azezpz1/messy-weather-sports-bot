@@ -127,38 +127,16 @@ def test_get_forecast_keeps_client_as_the_fourth_positional_argument() -> None:
 
 
 @respx.mock
-def test_get_forecast_falls_back_to_first_daytime_period_if_none_cover_the_game_window() -> None:
+def test_get_forecast_raises_if_the_game_is_past_the_last_forecast_period() -> None:
     periods = [
-        _hourly_period(
-            "2026-01-18T06:00:00-05:00", "Overnight Clear", 15, "0 mph", None, is_daytime=False
-        ),
         _hourly_period("2026-01-18T12:00:00-05:00", "Sunny", 30, "5 mph", 0, is_daytime=True),
     ]
     _mock_forecast(periods)
-    # Kickoff is outside the returned forecast window entirely.
+    # Kickoff is a week after the returned forecast ends.
     kickoff = dt.datetime(2026, 1, 25, 13, 0, tzinfo=EASTERN)
 
-    reports = get_forecast(LAT, LON, kickoff)
-
-    assert len(reports) == 1
-    assert reports[0].short_forecast == "Sunny"
-
-
-@respx.mock
-def test_get_forecast_falls_back_to_first_period_if_none_are_daytime_or_cover_the_window() -> None:
-    periods = [
-        _hourly_period(
-            "2026-01-18T06:00:00-05:00", "Overnight Clear", 15, "0 mph", None, is_daytime=False
-        ),
-    ]
-    _mock_forecast(periods)
-    kickoff = dt.datetime(2026, 1, 25, 13, 0, tzinfo=EASTERN)
-
-    reports = get_forecast(LAT, LON, kickoff)
-
-    assert len(reports) == 1
-    assert reports[0].short_forecast == "Overnight Clear"
-    assert reports[0].precipitation_probability is None
+    with pytest.raises(ValueError, match="no forecast period covers"):
+        get_forecast(LAT, LON, kickoff)
 
 
 def test_periods_in_window_raises_a_clear_error_on_an_empty_list() -> None:

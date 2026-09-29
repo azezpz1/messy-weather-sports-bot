@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import importlib.metadata
 import io
 import logging
@@ -35,6 +36,13 @@ EXIT_NOTHING_POSTED = 1
 EXIT_PARTIAL = 2
 
 
+def _parse_date(value: str) -> dt.date:
+    try:
+        return dt.date.fromisoformat(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid date {value!r}: expected YYYY-MM-DD") from None
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -52,6 +60,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help=(
             "Repost even if today's thread already finished on a platform, ignoring saved state."
+        ),
+    )
+    parser.add_argument(
+        "--date",
+        type=_parse_date,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help=(
+            "Report on this game day instead of today (Eastern time). For any other "
+            "day the run is forced to --dry-run, so it can't post the wrong day's report."
         ),
     )
     verbosity = parser.add_mutually_exclusive_group()
@@ -164,12 +182,21 @@ def _record_state(
         logger.warning("Could not save post state for %s: %s", platform, exc)
 
 
-def run(platform_names: list[str], dry_run: bool, force: bool = False) -> int:
-    date = todays_local_date()
+def run(
+    platform_names: list[str],
+    dry_run: bool,
+    force: bool = False,
+    date: dt.date | None = None,
+) -> int:
+    today = todays_local_date()
+    date = date or today
+    if date != today and not dry_run:
+        logger.warning("Previewing %s, not today; forcing --dry-run.", date.isoformat())
+        dry_run = True
     try:
         games = get_todays_games(date)
     except (httpx.HTTPError, ValueError) as exc:
-        logger.error("Could not fetch today's NFL schedule: %s", exc)
+        logger.error("Could not fetch the NFL schedule for %s: %s", date.isoformat(), exc)
         _log_run_summary(None, 0, 0, 0, [], None)
         return EXIT_NOTHING_POSTED
 
@@ -227,7 +254,9 @@ def run(platform_names: list[str], dry_run: bool, force: bool = False) -> int:
         return EXIT_OK
 
     if not evaluated:
-        logger.error("Forecast unavailable for every outdoor game today; nothing to post.")
+        logger.error(
+            "Forecast unavailable for every outdoor game on %s; nothing to post.", date.isoformat()
+        )
         _log_run_summary(len(games), outdoor_count, len(evaluated), len(messy), [], None)
         return EXIT_NOTHING_POSTED
 
@@ -318,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
         healthcheck.ping_start(healthcheck_url, run_id)
 
     try:
-        exit_code = run(platform_names, args.dry_run, args.force)
+        exit_code = run(platform_names, args.dry_run, args.force, args.date)
     except BaseException:
         # An unhandled exception means no completion ping below would ever fire -
         # Healthchecks would only notice once the run's grace period expires. Report

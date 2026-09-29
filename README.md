@@ -84,6 +84,9 @@ variables:
 # Preview what would be posted today, without posting anywhere:
 uv run messy-weather-nfl-bot --dry-run
 
+# Preview another game day (always a dry run; forecasts only reach ~7 days out):
+uv run messy-weather-nfl-bot --dry-run --date 2026-10-04
+
 # Post for real (requires BLUESKY_HANDLE / BLUESKY_APP_PASSWORD):
 uv run messy-weather-nfl-bot
 
