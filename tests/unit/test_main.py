@@ -487,7 +487,7 @@ def test_an_unhandled_exception_still_sends_a_failure_ping(
     )
     monkeypatch.setattr(
         "messy_weather_nfl_bot.main.run",
-        lambda platform_names, dry_run, force: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda platform_names, dry_run, force, date: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
     with pytest.raises(RuntimeError, match="boom"):
@@ -537,7 +537,7 @@ def test_the_failure_ping_after_a_crash_includes_the_running_version(
     )
     monkeypatch.setattr(
         "messy_weather_nfl_bot.main.run",
-        lambda platform_names, dry_run, force: (_ for _ in ()).throw(RuntimeError("boom")),
+        lambda platform_names, dry_run, force, date: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
     with pytest.raises(RuntimeError, match="boom"):
@@ -833,3 +833,41 @@ def test_quiet_mode_still_captures_the_run_summary_for_the_healthcheck_body(
 
     assert exit_code == EXIT_OK
     assert b"Run summary" in end_route.calls.last.request.content
+
+
+def test_date_flag_parses_and_defaults_to_none() -> None:
+    assert parse_args([]).date is None
+    assert parse_args(["--date", "2026-10-04"]).date == dt.date(2026, 10, 4)
+
+
+def test_date_flag_rejects_a_malformed_date() -> None:
+    for bad in ["10/04/2026", "20261004", "2026-W41-7", "2026-02-30"]:
+        with pytest.raises(SystemExit):
+            parse_args(["--date", bad])
+
+
+@respx.mock
+def test_another_date_is_forced_to_dry_run(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    caplog.set_level(logging.INFO, logger=LOGGER_NAME)
+    # "Today" is a different day from the (mocked) game day being previewed.
+    monkeypatch.setattr(
+        "messy_weather_nfl_bot.main.todays_local_date",
+        lambda: TARGET_DATE + dt.timedelta(days=1),
+    )
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
+    _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
+    dry_run_seen: list[bool] = []
+
+    def _capture_posters(platform_names: list[str], dry_run: bool) -> list:
+        dry_run_seen.append(dry_run)
+        return []
+
+    monkeypatch.setattr("messy_weather_nfl_bot.main.build_posters", _capture_posters)
+
+    run(platform_names=["bluesky"], dry_run=False, date=TARGET_DATE)
+
+    assert dry_run_seen == [True]
+    assert "forcing --dry-run" in caplog.text
