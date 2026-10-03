@@ -20,14 +20,15 @@ abstraction to add more platforms later.
 A game counts as messy if, at any hour between kickoff and the final whistle,
 the forecast shows:
 
-| Condition     | Threshold                                           |
-| ------------- | --------------------------------------------------- |
-| Snow          | snow, sleet, flurries, etc. with a ≥30% chance       |
-| Thunderstorms | ≥50% chance                                          |
-| Rain          | rain, showers, or drizzle with a ≥50% chance         |
-| Fog           | fog, mist, or haze in the forecast                   |
-| Wind          | ≥20 mph sustained                                    |
-| Cold / heat   | ≤32°F or ≥95°F                                       |
+| Condition     | Threshold                                                        |
+| ------------- | ---------------------------------------------------------------- |
+| Ice 🧊        | freezing rain, freezing drizzle, sleet, or ice pellets with a ≥30% chance |
+| Snow ❄️       | snow, flurries, wintry mix, etc. with a ≥30% chance              |
+| Thunderstorms | ≥50% chance                                                      |
+| Rain          | rain, showers, or drizzle with a ≥50% chance                     |
+| Fog           | fog or mist in the forecast (haze doesn't count)                 |
+| Wind          | ≥20 mph sustained                                                |
+| Cold / heat   | feels like ≤30°F (wind chill) or ≥103°F (heat index)             |
 
 So a "Slight Chance Rain Showers" (NWS's wording for 15–24%) sunny afternoon
 doesn't make the cut. An NWS alert on its own doesn't either — alerts for a
@@ -35,9 +36,19 @@ stadium's location include things like Small Craft Advisories — but an active
 alert does push an already-messy game up the ranking and is shown on its line.
 If NWS reports no precipitation odds for an hour at all, the forecast text is
 taken at its word - "Rain" with no reported odds still counts as rain.
-Messy games are ranked snow first, then by a combined score of wind,
-precipitation odds, temperature extremes, and alert severity. The thresholds
-live at the top of `src/messy_weather_nfl_bot/messiness.py`.
+
+Cold and heat are judged on how it feels, using the NWS wind chill and heat
+index formulas: 30°F with a 15 mph wind feels like 19°F, and a humid 93°F
+feels hotter than a dry 97°F. Posts show the feels-like temperature next to
+the air temperature when they differ by 5°F or more.
+
+Messy games are ranked by a combined score of precipitation odds, wind,
+feels-like temperature extremes, alert severity, and a bonus for the
+condition. Ice and snow carry by far the biggest bonuses, and heavy or blowing
+precipitation earns extra - but a precipitation bonus is scaled by its chance,
+so a likely snow game tops the list while a 30% chance of flurries ranks below
+a likely thunderstorm with 30 mph winds. The thresholds and weights live at
+the top of `src/messy_weather_nfl_bot/messiness.py`.
 
 Games in domed, fixed-roof, or retractable-roof stadiums are skipped, since
 roof status isn't reliably knowable ahead of time. If there are no outdoor

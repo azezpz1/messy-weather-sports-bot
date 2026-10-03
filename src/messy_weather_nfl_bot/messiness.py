@@ -10,13 +10,21 @@ from messy_weather_nfl_bot.schedule import Game
 from messy_weather_nfl_bot.weather import WeatherReport
 
 HIGH_WIND_MPH = 20.0
-EXTREME_COLD_F = 32
-EXTREME_HEAT_F = 95
+# Extreme cold and heat are judged on how it feels (WeatherReport.feels_like_f), not the
+# air temperature. Wind chill drops a few degrees below the air temperature with almost
+# any breeze, so the cold bar sits a little below freezing: a 38°F day with a 10 mph
+# breeze (feels ~31°F) doesn't count, but a 35°F one with that breeze (~27°F) does.
+# The heat bar is where NWS's heat index chart turns from "Extreme Caution"
+# to "Danger" - a humid 90°F afternoon reads as ~100°F, which is every early-September
+# game in Florida.
+EXTREME_COLD_F = 30
+EXTREME_HEAT_F = 103
 COMFORTABLE_LOW_F = 40
 COMFORTABLE_HIGH_F = 80
 
 
 class Condition(Enum):
+    ICE = "ice"
     SNOW = "snow"
     THUNDERSTORM = "thunderstorm"
     RAIN = "rain"
@@ -28,6 +36,7 @@ class Condition(Enum):
 
 
 EMOJI: dict[Condition, str] = {
+    Condition.ICE: "🧊",
     Condition.SNOW: "❄️",
     Condition.THUNDERSTORM: "⛈️",
     Condition.RAIN: "🌧️",
@@ -38,9 +47,13 @@ EMOJI: dict[Condition, str] = {
     Condition.CLEAR: "☀️",
 }
 
+# Snow and ice carry most of the weight: a near-certain snow game should outrank almost
+# anything else, but a precipitation bonus is scaled by its chance (see
+# messiness_score), so a few possible flurries don't outrank a likely, windy storm.
 _CONDITION_SCORE_BONUS: dict[Condition, float] = {
-    Condition.SNOW: 50.0,
-    Condition.THUNDERSTORM: 30.0,
+    Condition.ICE: 110.0,
+    Condition.SNOW: 100.0,
+    Condition.THUNDERSTORM: 40.0,
     Condition.RAIN: 15.0,
     Condition.FOG: 10.0,
     Condition.WIND: 10.0,
@@ -49,21 +62,40 @@ _CONDITION_SCORE_BONUS: dict[Condition, float] = {
     Condition.CLEAR: 0.0,
 }
 
-# The chance of precipitation (percent) a period needs before snow, thunderstorms, or
-# rain in its forecast text counts. NWS words 15-24% as "Slight Chance" and 30-50% as
-# "Chance", and a slight chance of an afternoon shower is most Southern game days in
-# September - without a floor, nearly every game reads as rainy. Snow is rare enough to
-# be worth flagging from a "Chance" up; rain and storms need to be at least a coin flip.
+# The chance of precipitation (percent) a period needs before ice, snow, thunderstorms,
+# or rain in its forecast text counts. NWS words 15-24% as "Slight Chance" and 30-50%
+# as "Chance", and a slight chance of an afternoon shower is most Southern game days in
+# September - without a floor, nearly every game reads as rainy. Ice and snow are rare
+# enough to be worth flagging from a "Chance" up; rain and storms need to be at least a
+# coin flip.
 MIN_PRECIP_PROBABILITY: dict[Condition, int] = {
+    Condition.ICE: 30,
     Condition.SNOW: 30,
     Condition.THUNDERSTORM: 50,
     Condition.RAIN: 50,
 }
 
-_SNOW_KEYWORDS = ("snow", "blizzard", "flurries", "sleet", "wintry mix")
+# Extra (chance-scaled) bonus for precipitation the forecast calls out as heavy or
+# wind-driven - "Heavy Rain" and "Blowing Snow" are messier than plain rain and snow.
+INTENSE_PRECIP_BONUS = 25.0
+_INTENSE_PRECIP_KEYWORDS = ("heavy", "blowing", "blizzard")
+
+# Checked in this order, so a mixed forecast takes its messiest part: "Rain And Sleet"
+# is ICE, "Rain And Snow" is SNOW, "Showers And Thunderstorms" is THUNDERSTORM. Ice comes
+# before rain because "freezing rain" contains "rain". Plain "freezing" isn't an ice
+# keyword - "Freezing Fog" is fog. Haze isn't fog: it rarely affects a game.
+_ICE_KEYWORDS = ("freezing rain", "freezing drizzle", "sleet", "ice pellets")
+_SNOW_KEYWORDS = ("snow", "blizzard", "flurries", "wintry mix")
 _THUNDERSTORM_KEYWORDS = ("thunderstorm",)
 _RAIN_KEYWORDS = ("rain", "showers", "drizzle")
-_FOG_KEYWORDS = ("fog", "mist", "haze")
+_FOG_KEYWORDS = ("fog", "mist")
+
+_PRECIP_KEYWORDS: tuple[tuple[Condition, tuple[str, ...]], ...] = (
+    (Condition.ICE, _ICE_KEYWORDS),
+    (Condition.SNOW, _SNOW_KEYWORDS),
+    (Condition.THUNDERSTORM, _THUNDERSTORM_KEYWORDS),
+    (Condition.RAIN, _RAIN_KEYWORDS),
+)
 
 
 @dataclass(frozen=True)
@@ -72,10 +104,6 @@ class GameWeather:
     weather: WeatherReport
     condition: Condition
     score: float
-    has_snow: bool
-    """Whether snow appears in any period across the game, even if a later, higher-scoring
-    period is what's shown as `weather`/`condition` - used to keep snow games ranked
-    first regardless of which period ends up being the messiest one."""
     alert: WeatherAlert | None
     """The most severe active NWS alert (Warning > Watch > Advisory) overlapping the
     game, or None if there isn't one."""
@@ -97,39 +125,49 @@ def _precip_likely(weather: WeatherReport, condition: Condition) -> bool:
 def classify_condition(weather: WeatherReport) -> Condition:
     """The messiest condition in `weather`, or CLEAR if nothing about it is messy.
     Precipitation below its MIN_PRECIP_PROBABILITY is ignored, falling through to the
-    wind and temperature checks - a 20% shower chance with 25mph wind is a WIND game."""
+    wind and temperature checks - a 20% shower chance with 25mph wind is a WIND game.
+    Cold and heat are judged on the wind chill / heat index, not the air temperature."""
     forecast = weather.short_forecast.lower()
 
-    for condition, keywords in (
-        (Condition.SNOW, _SNOW_KEYWORDS),
-        (Condition.THUNDERSTORM, _THUNDERSTORM_KEYWORDS),
-        (Condition.RAIN, _RAIN_KEYWORDS),
-    ):
+    for condition, keywords in _PRECIP_KEYWORDS:
         if any(keyword in forecast for keyword in keywords) and _precip_likely(weather, condition):
             return condition
     if any(keyword in forecast for keyword in _FOG_KEYWORDS):
         return Condition.FOG
     if weather.wind_speed_mph >= HIGH_WIND_MPH:
         return Condition.WIND
-    if weather.temperature_f is not None and weather.temperature_f <= EXTREME_COLD_F:
+    feels_like = weather.feels_like_f
+    if feels_like is not None and feels_like <= EXTREME_COLD_F:
         return Condition.EXTREME_COLD
-    if weather.temperature_f is not None and weather.temperature_f >= EXTREME_HEAT_F:
+    if feels_like is not None and feels_like >= EXTREME_HEAT_F:
         return Condition.EXTREME_HEAT
     return Condition.CLEAR
 
 
 def messiness_score(weather: WeatherReport, condition: Condition) -> float:
-    """Higher is messier. Combines precipitation odds, wind, temperature extremity,
-    and a bonus for the classified condition. A missing temperature contributes no
-    extremity rather than being scored as if it were a measured 0°F."""
+    """Higher is messier. Combines precipitation odds, wind, how far the feels-like
+    temperature is from comfortable, and a bonus for the classified condition. A
+    precipitation condition's bonus (plus any heavy/blowing bonus) is scaled by its
+    chance, so a 30% chance of snow earns 30% of the snow bonus; with no reported
+    chance, the forecast text is trusted and the full bonus applies. A missing
+    temperature contributes no extremity rather than being scored as if it were a
+    measured 0°F."""
     precip_component = weather.precipitation_probability or 0
     wind_component = weather.wind_speed_mph * 1.5
     temp_extremity = 0.0
-    if weather.temperature_f is not None:
-        temp_extremity = max(0, COMFORTABLE_LOW_F - weather.temperature_f) + max(
-            0, weather.temperature_f - COMFORTABLE_HIGH_F
+    feels_like = weather.feels_like_f
+    if feels_like is not None:
+        temp_extremity = max(0.0, COMFORTABLE_LOW_F - feels_like) + max(
+            0.0, feels_like - COMFORTABLE_HIGH_F
         )
-    return precip_component + wind_component + temp_extremity + _CONDITION_SCORE_BONUS[condition]
+    bonus = _CONDITION_SCORE_BONUS[condition]
+    if condition in MIN_PRECIP_PROBABILITY:
+        forecast = weather.short_forecast.lower()
+        if any(keyword in forecast for keyword in _INTENSE_PRECIP_KEYWORDS):
+            bonus += INTENSE_PRECIP_BONUS
+        if weather.precipitation_probability is not None:
+            bonus *= weather.precipitation_probability / 100
+    return precip_component + wind_component + temp_extremity + bonus
 
 
 def evaluate_game(
@@ -151,7 +189,6 @@ def evaluate_game(
         for weather in weather_reports
         for condition in (classify_condition(weather),)
     ]
-    has_snow = any(condition is Condition.SNOW for condition, _, _ in scored)
 
     # weather_reports is always non-empty (see get_forecast), so max() has something.
     condition, weather, score = max(
@@ -162,12 +199,11 @@ def evaluate_game(
         weather=weather,
         condition=condition,
         score=score,
-        has_snow=has_snow,
         alert=alert,
     )
 
 
 def sort_by_messiness(games: list[GameWeather]) -> list[GameWeather]:
-    """Games with snow at any point sort first, then everything else by messiness score
-    descending - even if a later, stormier period outscored the snow for display."""
-    return sorted(games, key=lambda gw: (not gw.has_snow, -gw.score))
+    """Messiest first, by score. Snow and ice don't jump the queue on their own -
+    their heavy, chance-scaled weight in the score is what usually puts them on top."""
+    return sorted(games, key=lambda gw: -gw.score)
