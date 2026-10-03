@@ -12,6 +12,10 @@ from messy_weather_nfl_bot.schedule import GAME_DAY_TIMEZONE
 # can count as more than one grapheme and Python's len() undercounts that.
 MAX_POST_LENGTH = 280
 
+# Show the wind chill / heat index next to the temperature once it's this far from the
+# air temperature - otherwise a 🥶 next to "35°F" wouldn't explain itself.
+FEELS_LIKE_MIN_DIFFERENCE_F = 5
+
 
 def format_kickoff(kickoff: dt.datetime) -> str:
     """Kickoff time in the NFL's Eastern game-day timezone, e.g. "1:00pm ET"."""
@@ -27,7 +31,14 @@ def format_game_line(gw: GameWeather) -> str:
     kickoff = format_kickoff(gw.game.kickoff)
     parts = [f"{weather.short_forecast}"]
     if weather.temperature_f is not None:
-        parts.append(f"{weather.temperature_f}°F")
+        temperature = f"{weather.temperature_f}°F"
+        feels_like = weather.feels_like_f
+        if (
+            feels_like is not None
+            and abs(feels_like - weather.temperature_f) >= FEELS_LIKE_MIN_DIFFERENCE_F
+        ):
+            temperature += f" (feels {round(feels_like)}°F)"
+        parts.append(temperature)
     if weather.wind_speed_mph > 0:
         parts.append(f"{weather.wind_speed_mph:g}mph wind")
     line = (

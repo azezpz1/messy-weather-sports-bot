@@ -4,7 +4,14 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot.weather import _parse_wind_speed_mph, _periods_in_window, get_forecast
+from messy_weather_nfl_bot.weather import (
+    WeatherReport,
+    _parse_wind_speed_mph,
+    _periods_in_window,
+    get_forecast,
+    heat_index_f,
+    wind_chill_f,
+)
 
 LAT, LON = 44.5013, -88.0622
 EASTERN = dt.timezone(dt.timedelta(hours=-5))  # EST, matches the fixture period offsets below
@@ -112,6 +119,34 @@ def test_get_forecast_handles_null_temperature_and_wind_speed() -> None:
     assert incomplete.temperature_f is None  # not a fabricated 0°F
     assert incomplete.wind_speed_mph == 0.0
     assert incomplete.precipitation_probability is None
+    assert incomplete.relative_humidity is None
+
+
+@respx.mock
+def test_get_forecast_reads_relative_humidity() -> None:
+    period = _hourly_period("2026-01-18T18:00:00-05:00", "Sunny", 35, "5 mph", 0)
+    period["relativeHumidity"] = {"unitCode": "wmoUnit:percent", "value": 72}
+    _mock_forecast([period])
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    reports = get_forecast(LAT, LON, kickoff, game_duration=dt.timedelta(hours=1))
+
+    assert reports[0].relative_humidity == 72
+
+
+@respx.mock
+@pytest.mark.parametrize("value", ["72", True, None])
+def test_get_forecast_treats_a_non_numeric_relative_humidity_as_unreported(
+    value: object,
+) -> None:
+    period = _hourly_period("2026-01-18T18:00:00-05:00", "Sunny", 35, "5 mph", 0)
+    period["relativeHumidity"] = {"unitCode": "wmoUnit:percent", "value": value}
+    _mock_forecast([period])
+    kickoff = dt.datetime(2026, 1, 18, 18, 0, tzinfo=EASTERN)
+
+    reports = get_forecast(LAT, LON, kickoff, game_duration=dt.timedelta(hours=1))
+
+    assert reports[0].relative_humidity is None
 
 
 def test_get_forecast_keeps_client_as_the_fourth_positional_argument() -> None:
@@ -295,3 +330,77 @@ def test_get_forecast_rounds_an_over_precise_point_instead_of_hitting_the_redire
     reports = get_forecast(BUF_LAT, BUF_LON, kickoff)
 
     assert [report.short_forecast for report in reports] == ["Snow"]
+
+
+# Expected values are read off the NWS wind chill and heat index charts.
+@pytest.mark.parametrize(
+    ("temperature_f", "wind_speed_mph", "expected"),
+    [(30, 15, 19), (0, 10, -16), (40, 5, 36), (20, 30, 1)],
+)
+def test_wind_chill_matches_the_nws_chart(
+    temperature_f: float, wind_speed_mph: float, expected: float
+) -> None:
+    assert round(wind_chill_f(temperature_f, wind_speed_mph)) == expected
+
+
+@pytest.mark.parametrize(
+    ("temperature_f", "relative_humidity", "expected"),
+    [(90, 70, 106), (80, 40, 80), (96, 50, 108), (86, 60, 91)],
+)
+def test_heat_index_matches_the_nws_chart(
+    temperature_f: float, relative_humidity: float, expected: float
+) -> None:
+    assert round(heat_index_f(temperature_f, relative_humidity)) == expected
+
+
+def test_heat_index_adjusts_down_for_very_dry_air() -> None:
+    # Below 13% humidity the NWS subtracts a correction from the regression - a dry
+    # 100°F day feels cooler than the air temperature.
+    assert heat_index_f(100, 10) < 100
+
+
+def test_heat_index_adjusts_up_for_very_humid_air() -> None:
+    # Above 85% humidity between 80°F and 87°F the NWS adds a correction: here 98.04
+    # from the regression, plus ((90 - 85) / 10) * ((87 - 84) / 5) = 0.3.
+    assert heat_index_f(84, 90) == pytest.approx(98.34, abs=0.01)
+
+
+def test_heat_index_uses_the_simple_formula_when_it_is_mild() -> None:
+    assert heat_index_f(70, 50) == pytest.approx(0.5 * (70 + 61 + 2 * 1.2 + 50 * 0.094))
+
+
+def make_report(
+    temperature_f: int | None, wind_speed_mph: float = 0.0, relative_humidity: int | None = None
+) -> WeatherReport:
+    return WeatherReport(
+        short_forecast="Sunny",
+        temperature_f=temperature_f,
+        wind_speed_mph=wind_speed_mph,
+        precipitation_probability=0,
+        relative_humidity=relative_humidity,
+    )
+
+
+def test_feels_like_is_the_wind_chill_when_cold_and_windy() -> None:
+    assert make_report(30, 15.0).feels_like_f == pytest.approx(wind_chill_f(30, 15))
+
+
+def test_feels_like_is_the_air_temperature_when_cold_but_calm() -> None:
+    # The wind chill formula isn't defined below 3 mph.
+    assert make_report(30, 2.0).feels_like_f == 30
+
+
+def test_feels_like_is_the_heat_index_when_hot() -> None:
+    assert make_report(90, relative_humidity=70).feels_like_f == pytest.approx(heat_index_f(90, 70))
+
+
+def test_feels_like_is_the_air_temperature_when_hot_with_unknown_humidity() -> None:
+    assert make_report(90).feels_like_f == 90
+
+
+def test_feels_like_is_the_air_temperature_when_mild() -> None:
+    assert make_report(65, 20.0, 90).feels_like_f == 65
+
+
+def test_feels_like_is_none_without_a_temperature() -> None:
+    assert make_report(None, 20.0).feels_like_f is None

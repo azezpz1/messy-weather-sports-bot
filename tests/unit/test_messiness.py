@@ -4,6 +4,7 @@ import pytest
 
 from messy_weather_nfl_bot.alerts import AlertSeverity, WeatherAlert
 from messy_weather_nfl_bot.messiness import (
+    EMOJI,
     Condition,
     classify_condition,
     evaluate_game,
@@ -29,12 +30,14 @@ def make_weather(
     temperature_f: int | None = 65,
     wind_speed_mph: float = 5.0,
     precipitation_probability: int | None = 0,
+    relative_humidity: int | None = None,
 ) -> WeatherReport:
     return WeatherReport(
         short_forecast=short_forecast,
         temperature_f=temperature_f,
         wind_speed_mph=wind_speed_mph,
         precipitation_probability=precipitation_probability,
+        relative_humidity=relative_humidity,
     )
 
 
@@ -66,7 +69,7 @@ def test_classify_condition_extreme_cold() -> None:
 
 
 def test_classify_condition_extreme_heat() -> None:
-    weather = make_weather(short_forecast="Sunny", temperature_f=100)
+    weather = make_weather(short_forecast="Sunny", temperature_f=105)
     assert classify_condition(weather) == Condition.EXTREME_HEAT
 
 
@@ -85,16 +88,15 @@ def test_messiness_score_increases_with_precip_wind_and_temp_extremity() -> None
     )
 
 
-def test_sort_by_messiness_snow_always_first_even_with_lower_score() -> None:
-    # A mild snow game should still rank above a severe (but snow-less) storm.
+def test_likely_snow_outranks_a_likely_windy_thunderstorm() -> None:
     snow = evaluate_game(
         make_game("GB"),
         [
             make_weather(
-                short_forecast="Light Snow",
-                temperature_f=30,
-                wind_speed_mph=2,
-                precipitation_probability=40,
+                short_forecast="Snow",
+                temperature_f=28,
+                wind_speed_mph=10,
+                precipitation_probability=90,
             )
         ],
     )
@@ -102,18 +104,45 @@ def test_sort_by_messiness_snow_always_first_even_with_lower_score() -> None:
         make_game("KC"),
         [
             make_weather(
-                short_forecast="Thunderstorms",
-                wind_speed_mph=45,
-                temperature_f=95,
-                precipitation_probability=100,
+                short_forecast="Thunderstorms Likely",
+                temperature_f=75,
+                wind_speed_mph=30,
+                precipitation_probability=90,
             )
         ],
     )
-    assert storm.score > snow.score
 
-    ranked = sort_by_messiness([storm, snow])
-    assert ranked[0].condition == Condition.SNOW
-    assert ranked[1].condition == Condition.THUNDERSTORM
+    assert sort_by_messiness([storm, snow]) == [snow, storm]
+
+
+def test_a_chance_of_flurries_ranks_below_a_likely_windy_thunderstorm() -> None:
+    # Issue #32's acceptance criterion. Snow no longer jumps the queue on its own: a
+    # few possible flurries earn only part of the snow bonus.
+    for flurry_chance in (20, 30):
+        flurries = evaluate_game(
+            make_game("GB"),
+            [
+                make_weather(
+                    short_forecast="Chance Flurries",
+                    temperature_f=30,
+                    wind_speed_mph=5,
+                    precipitation_probability=flurry_chance,
+                )
+            ],
+        )
+        storm = evaluate_game(
+            make_game("KC"),
+            [
+                make_weather(
+                    short_forecast="Thunderstorms Likely",
+                    temperature_f=75,
+                    wind_speed_mph=30,
+                    precipitation_probability=90,
+                )
+            ],
+        )
+
+        assert sort_by_messiness([flurries, storm]) == [storm, flurries]
 
 
 def test_sort_by_messiness_orders_non_snow_games_by_score_descending() -> None:
@@ -140,28 +169,6 @@ def test_evaluate_game_picks_the_messiest_period_not_the_first() -> None:
     assert result.weather == snow_later
 
 
-def test_evaluate_game_flags_has_snow_even_when_a_later_period_scores_higher() -> None:
-    # Mild snow early, then a much stormier period that outscores it - the displayed
-    # report should be the messier storm, but has_snow must still reflect the snow.
-    mild_snow = make_weather(
-        short_forecast="Light Snow",
-        temperature_f=30,
-        wind_speed_mph=2,
-        precipitation_probability=40,
-    )
-    bigger_storm = make_weather(
-        short_forecast="Thunderstorms",
-        wind_speed_mph=45,
-        temperature_f=95,
-        precipitation_probability=100,
-    )
-
-    result = evaluate_game(make_game("GB"), [mild_snow, bigger_storm])
-
-    assert result.condition == Condition.THUNDERSTORM
-    assert result.has_snow is True
-
-
 def test_classify_condition_missing_temperature_is_not_extreme() -> None:
     # A missing temperature must not be treated as a measured 0°F (extreme cold).
     weather = make_weather(short_forecast="Sunny", temperature_f=None)
@@ -176,33 +183,6 @@ def test_messiness_score_excludes_missing_temperature_from_extremity() -> None:
     assert messiness_score(missing, classify_condition(missing)) == messiness_score(
         calm_at_comfortable_temp, classify_condition(calm_at_comfortable_temp)
     )
-
-
-def test_sort_by_messiness_keeps_snow_first_when_a_stormier_period_scores_higher() -> None:
-    # The game has snow at some point, but a later thunderstorm period scores higher and
-    # becomes the displayed condition - it must still rank ahead of a snow-less game.
-    mixed_snow_and_storm = evaluate_game(
-        make_game("GB"),
-        [
-            make_weather(
-                short_forecast="Light Snow",
-                temperature_f=30,
-                wind_speed_mph=2,
-                precipitation_probability=40,
-            ),
-            make_weather(
-                short_forecast="Thunderstorms",
-                wind_speed_mph=45,
-                temperature_f=95,
-                precipitation_probability=100,
-            ),
-        ],
-    )
-    clear = evaluate_game(make_game("KC"), [make_weather(short_forecast="Sunny")])
-
-    ranked = sort_by_messiness([clear, mixed_snow_and_storm])
-
-    assert ranked[0] is mixed_snow_and_storm
 
 
 def test_evaluate_game_with_no_alerts_matches_the_no_alerts_argument_case() -> None:
@@ -363,7 +343,7 @@ def test_low_odds_rain_still_classifies_as_wind_when_windy() -> None:
     [
         pytest.param(make_weather("Sunny", 65, 20.0, 0), id="high wind"),
         pytest.param(make_weather("Sunny", 25, 5.0, 0), id="extreme cold"),
-        pytest.param(make_weather("Sunny", 97, 5.0, 0), id="extreme heat"),
+        pytest.param(make_weather("Sunny", 95, 5.0, 0, 50), id="extreme heat"),
         pytest.param(make_weather("Patchy Fog", 50, 3.0, 0), id="fog"),
         pytest.param(make_weather("Snow Likely", 30, 5.0, 60), id="snow"),
     ],
@@ -404,6 +384,149 @@ def test_evaluate_game_shows_the_messy_period_over_a_higher_scoring_nice_one() -
     assert result.weather == windy
 
 
-def test_has_snow_ignores_low_odds_snow() -> None:
-    result = evaluate_game(make_game(), [make_weather("Slight Chance Snow Showers", 33, 5.0, 20)])
-    assert result.has_snow is False
+# Real NWS hourly `shortForecast` strings and the condition each should map to, at
+# odds high enough to clear every precipitation floor. Tune keywords against this table.
+@pytest.mark.parametrize(
+    ("short_forecast", "expected"),
+    [
+        ("Sunny", Condition.CLEAR),
+        ("Mostly Sunny", Condition.CLEAR),
+        ("Partly Sunny", Condition.CLEAR),
+        ("Partly Cloudy", Condition.CLEAR),
+        ("Mostly Cloudy", Condition.CLEAR),
+        ("Cloudy", Condition.CLEAR),
+        ("Clear", Condition.CLEAR),
+        ("Haze", Condition.CLEAR),
+        ("Areas Of Smoke", Condition.CLEAR),
+        ("Patchy Fog", Condition.FOG),
+        ("Areas Of Fog", Condition.FOG),
+        ("Fog", Condition.FOG),
+        ("Patchy Freezing Fog", Condition.FOG),
+        ("Patchy Drizzle", Condition.RAIN),
+        ("Drizzle", Condition.RAIN),
+        ("Light Rain", Condition.RAIN),
+        ("Light Rain Likely", Condition.RAIN),
+        ("Rain", Condition.RAIN),
+        ("Heavy Rain", Condition.RAIN),
+        ("Rain Showers Likely", Condition.RAIN),
+        ("Chance Rain Showers", Condition.RAIN),
+        ("Showers And Thunderstorms", Condition.THUNDERSTORM),
+        ("Showers And Thunderstorms Likely", Condition.THUNDERSTORM),
+        ("Chance Showers And Thunderstorms", Condition.THUNDERSTORM),
+        ("Thunderstorms", Condition.THUNDERSTORM),
+        ("Light Snow", Condition.SNOW),
+        ("Light Snow Likely", Condition.SNOW),
+        ("Snow", Condition.SNOW),
+        ("Heavy Snow", Condition.SNOW),
+        ("Snow Showers", Condition.SNOW),
+        ("Chance Snow Showers", Condition.SNOW),
+        ("Blowing Snow", Condition.SNOW),
+        ("Blizzard", Condition.SNOW),
+        ("Flurries", Condition.SNOW),
+        ("Rain And Snow", Condition.SNOW),
+        ("Rain And Snow Likely", Condition.SNOW),
+        ("Wintry Mix", Condition.SNOW),
+        ("Freezing Rain", Condition.ICE),
+        ("Chance Freezing Rain", Condition.ICE),
+        ("Freezing Drizzle", Condition.ICE),
+        ("Sleet", Condition.ICE),
+        ("Rain And Sleet", Condition.ICE),
+        ("Snow And Sleet", Condition.ICE),
+        ("Freezing Rain And Sleet", Condition.ICE),
+        ("Ice Pellets", Condition.ICE),
+    ],
+)
+def test_real_nws_short_forecasts_map_to_the_expected_condition(
+    short_forecast: str, expected: Condition
+) -> None:
+    weather = make_weather(short_forecast=short_forecast, precipitation_probability=80)
+    assert classify_condition(weather) == expected
+
+
+def test_freezing_rain_is_ice_with_its_own_emoji() -> None:
+    result = evaluate_game(make_game(), [make_weather("Freezing Rain", 31, 5.0, 80)])
+    assert result.condition == Condition.ICE
+    assert EMOJI[Condition.ICE] == "🧊"
+
+
+def test_low_odds_freezing_rain_is_not_ice() -> None:
+    weather = make_weather("Slight Chance Freezing Rain", 45, 5.0, 20)
+    assert classify_condition(weather) == Condition.CLEAR
+
+
+def test_freezing_rain_outscores_plain_rain_at_the_same_odds() -> None:
+    ice = make_weather("Freezing Rain", 33, 5.0, 80)
+    rain = make_weather("Rain", 33, 5.0, 80)
+    assert messiness_score(ice, classify_condition(ice)) > messiness_score(
+        rain, classify_condition(rain)
+    )
+
+
+def test_precipitation_bonus_scales_with_its_chance() -> None:
+    likely = make_weather("Snow Likely", 33, 0.0, 90)
+    possible = make_weather("Chance Snow", 33, 0.0, 30)
+    # Beyond the 60-point gap in raw odds, the snow bonus itself shrinks with the chance.
+    assert messiness_score(likely, Condition.SNOW) - messiness_score(possible, Condition.SNOW) > 60
+
+
+def test_precipitation_with_no_reported_odds_gets_the_full_bonus() -> None:
+    unknown = make_weather("Snow", 33, 0.0, None)
+    certain = make_weather("Snow", 33, 0.0, 100)
+    # Same bonus; the certain one also has 100 points of raw precipitation odds.
+    assert messiness_score(certain, Condition.SNOW) - messiness_score(
+        unknown, Condition.SNOW
+    ) == pytest.approx(100)
+
+
+@pytest.mark.parametrize(
+    ("intense", "plain", "condition"),
+    [
+        ("Heavy Rain", "Rain", Condition.RAIN),
+        ("Heavy Snow", "Snow", Condition.SNOW),
+        ("Blowing Snow", "Snow", Condition.SNOW),
+        ("Blizzard", "Snow", Condition.SNOW),
+    ],
+)
+def test_heavy_or_blowing_precipitation_outscores_the_plain_kind(
+    intense: str, plain: str, condition: Condition
+) -> None:
+    intense_weather = make_weather(intense, 30, 10.0, 80)
+    plain_weather = make_weather(plain, 30, 10.0, 80)
+    assert messiness_score(intense_weather, condition) > messiness_score(plain_weather, condition)
+
+
+def test_haze_is_not_fog() -> None:
+    assert classify_condition(make_weather("Haze")) == Condition.CLEAR
+
+
+def test_wind_chill_makes_an_above_freezing_game_extreme_cold() -> None:
+    # 30°F with 15 mph wind feels like ~19°F, though only 30°F reads on a thermometer.
+    weather = make_weather("Sunny", temperature_f=30, wind_speed_mph=15)
+    assert classify_condition(weather) == Condition.EXTREME_COLD
+
+
+def test_a_still_cold_but_bearable_day_is_not_extreme_cold() -> None:
+    weather = make_weather("Sunny", temperature_f=35, wind_speed_mph=5)
+    assert classify_condition(weather) == Condition.CLEAR
+
+
+def test_heat_index_makes_a_humid_game_extreme_heat_but_a_dry_hotter_one_not() -> None:
+    humid = make_weather("Sunny", temperature_f=93, relative_humidity=60)
+    dry = make_weather("Sunny", temperature_f=97, relative_humidity=15)
+    assert classify_condition(humid) == Condition.EXTREME_HEAT
+    assert classify_condition(dry) == Condition.CLEAR
+
+
+def test_wind_chill_raises_the_score() -> None:
+    calm = make_weather("Sunny", temperature_f=35, wind_speed_mph=0)
+    windy = make_weather("Sunny", temperature_f=35, wind_speed_mph=15)
+    # Wind adds 1.5 points per mph on its own; the wind chill adds more on top.
+    assert (
+        messiness_score(windy, Condition.CLEAR) - messiness_score(calm, Condition.CLEAR) > 15 * 1.5
+    )
+
+
+def test_humidity_raises_the_score_of_a_hot_game() -> None:
+    dry = make_weather("Sunny", temperature_f=90, relative_humidity=20)
+    humid = make_weather("Sunny", temperature_f=90, relative_humidity=70)
+    assert messiness_score(humid, Condition.CLEAR) > messiness_score(dry, Condition.CLEAR)

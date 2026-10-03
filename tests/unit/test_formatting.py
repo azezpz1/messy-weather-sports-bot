@@ -48,6 +48,17 @@ def test_format_game_line_omits_wind_when_calm() -> None:
     assert "mph wind" not in format_game_line(gw)
 
 
+def test_format_game_line_shows_the_wind_chill_when_it_differs() -> None:
+    # 28°F at 15 mph feels like ~16°F.
+    gw = make_game_weather("GB", "CHI", "Snow", wind_speed_mph=15)
+    assert "28°F (feels 16°F)" in format_game_line(gw)
+
+
+def test_format_game_line_omits_feels_like_when_close_to_the_air_temperature() -> None:
+    gw = make_game_weather("GB", "CHI", "Snow", temperature_f=40, wind_speed_mph=4)
+    assert "feels" not in format_game_line(gw)
+
+
 def test_format_game_line_omits_temperature_when_missing() -> None:
     gw = make_game_weather("GB", "CHI", "Sunny", temperature_f=None)
     assert "°F" not in format_game_line(gw)
