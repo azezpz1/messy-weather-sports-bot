@@ -12,11 +12,12 @@ from messy_weather_nfl_bot.weather import WeatherReport
 HIGH_WIND_MPH = 20.0
 # Extreme cold and heat are judged on how it feels (WeatherReport.feels_like_f), not the
 # air temperature. Wind chill drops a few degrees below the air temperature with almost
-# any breeze, so the cold bar sits below freezing to keep a still 35°F November day from
-# counting. The heat bar is where NWS's heat index chart turns from "Extreme Caution"
+# any breeze, so the cold bar sits a little below freezing: a 38°F day with a 10 mph
+# breeze (feels ~31°F) doesn't count, but a 35°F one with that breeze (~27°F) does.
+# The heat bar is where NWS's heat index chart turns from "Extreme Caution"
 # to "Danger" - a humid 90°F afternoon reads as ~100°F, which is every early-September
 # game in Florida.
-EXTREME_COLD_F = 25
+EXTREME_COLD_F = 30
 EXTREME_HEAT_F = 103
 COMFORTABLE_LOW_F = 40
 COMFORTABLE_HIGH_F = 80

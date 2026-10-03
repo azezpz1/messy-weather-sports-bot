@@ -505,6 +505,20 @@ def test_wind_chill_makes_an_above_freezing_game_extreme_cold() -> None:
     assert classify_condition(weather) == Condition.EXTREME_COLD
 
 
+@pytest.mark.parametrize(
+    ("temperature_f", "wind_speed_mph", "expected"),
+    [
+        pytest.param(35, 10.0, Condition.EXTREME_COLD, id="35F, 10mph feels ~27F"),
+        pytest.param(38, 10.0, Condition.CLEAR, id="38F, 10mph feels ~31F"),
+    ],
+)
+def test_extreme_cold_cutoff_is_a_30f_wind_chill(
+    temperature_f: int, wind_speed_mph: float, expected: Condition
+) -> None:
+    weather = make_weather("Sunny", temperature_f=temperature_f, wind_speed_mph=wind_speed_mph)
+    assert classify_condition(weather) == expected
+
+
 def test_a_still_cold_but_bearable_day_is_not_extreme_cold() -> None:
     weather = make_weather("Sunny", temperature_f=35, wind_speed_mph=5)
     assert classify_condition(weather) == Condition.CLEAR

@@ -28,7 +28,7 @@ the forecast shows:
 | Rain          | rain, showers, or drizzle with a ≥50% chance                     |
 | Fog           | fog or mist in the forecast (haze doesn't count)                 |
 | Wind          | ≥20 mph sustained                                                |
-| Cold / heat   | feels like ≤25°F (wind chill) or ≥103°F (heat index)             |
+| Cold / heat   | feels like ≤30°F (wind chill) or ≥103°F (heat index)             |
 
 So a "Slight Chance Rain Showers" (NWS's wording for 15–24%) sunny afternoon
 doesn't make the cut. An NWS alert on its own doesn't either — alerts for a
