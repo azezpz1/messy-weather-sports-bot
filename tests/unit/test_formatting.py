@@ -2,12 +2,12 @@ import datetime as dt
 
 import pytest
 
-from messy_weather_nfl_bot.alerts import AlertSeverity, WeatherAlert
-from messy_weather_nfl_bot.formatting import build_post_texts, format_game_line, format_header
-from messy_weather_nfl_bot.messiness import evaluate_game
-from messy_weather_nfl_bot.schedule import Game
-from messy_weather_nfl_bot.stadiums import stadium_for_team
-from messy_weather_nfl_bot.weather import WeatherReport
+from messy_weather_sports_bot.alerts import AlertSeverity, WeatherAlert
+from messy_weather_sports_bot.formatting import build_post_texts, format_game_line, format_header
+from messy_weather_sports_bot.messiness import evaluate_game
+from messy_weather_sports_bot.schedule import Game
+from messy_weather_sports_bot.stadiums import stadium_for_team
+from messy_weather_sports_bot.weather import WeatherReport
 
 GAME_DATE = dt.date(2026, 1, 18)
 

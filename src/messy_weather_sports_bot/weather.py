@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from messy_weather_nfl_bot.retry import request_with_retry
+from messy_weather_sports_bot.retry import request_with_retry
 
 POINTS_URL = "https://api.weather.gov/points/{point}"
 

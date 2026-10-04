@@ -1,5 +1,5 @@
 [project]
-name = "messy-weather-nfl-bot"
+name = "messy-weather-sports-bot"
 version = "3.0.0"
 description = "Posts messy NFL game-day weather to social media"
 authors = [
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-messy-weather-nfl-bot = "messy_weather_nfl_bot.main:main"
+messy-weather-nfl-bot = "messy_weather_sports_bot.main:main"
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.13.0"]

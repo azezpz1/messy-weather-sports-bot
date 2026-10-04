@@ -4,7 +4,7 @@ import datetime as dt
 
 import pytest
 
-from messy_weather_nfl_bot.schedule import get_todays_games
+from messy_weather_sports_bot.schedule import get_todays_games
 
 # Super Bowl LVIII (Chiefs vs. 49ers), a fixed historical date guaranteed to have exactly
 # one NFL game, played at the (covered) Allegiant Stadium.

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import datetime as dt
 
-from messy_weather_nfl_bot.alerts import AlertSeverity
-from messy_weather_nfl_bot.messiness import EMOJI, GameWeather
-from messy_weather_nfl_bot.schedule import GAME_DAY_TIMEZONE
+from messy_weather_sports_bot.alerts import AlertSeverity
+from messy_weather_sports_bot.messiness import EMOJI, GameWeather
+from messy_weather_sports_bot.schedule import GAME_DAY_TIMEZONE
 
 # Bluesky's real limit is 300 graphemes; stay conservative since multi-codepoint emoji
 # can count as more than one grapheme and Python's len() undercounts that.

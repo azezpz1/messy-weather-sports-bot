@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot.weather import (
+from messy_weather_sports_bot.weather import (
     WeatherReport,
     _parse_wind_speed_mph,
     _periods_in_window,

@@ -1,7 +1,7 @@
 import pytest
 
-from messy_weather_nfl_bot.poster.base import PartialThreadError, PostRef, SocialMediaPoster
-from messy_weather_nfl_bot.poster.console import ConsolePoster
+from messy_weather_sports_bot.poster.base import PartialThreadError, PostRef, SocialMediaPoster
+from messy_weather_sports_bot.poster.console import ConsolePoster
 
 
 @pytest.fixture(autouse=True)

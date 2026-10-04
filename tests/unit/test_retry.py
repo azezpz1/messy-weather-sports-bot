@@ -4,7 +4,7 @@ from email.utils import format_datetime
 import httpx
 import pytest
 
-from messy_weather_nfl_bot.retry import _retry_after_seconds, request_with_retry
+from messy_weather_sports_bot.retry import _retry_after_seconds, request_with_retry
 
 URL = "https://example.test/thing"
 

@@ -19,7 +19,7 @@ import logging
 import os
 from pathlib import Path
 
-from messy_weather_nfl_bot.poster.base import PostRef
+from messy_weather_sports_bot.poster.base import PostRef
 
 logger = logging.getLogger(__name__)
 

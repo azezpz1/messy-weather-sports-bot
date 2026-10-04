@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot.schedule import (
+from messy_weather_sports_bot.schedule import (
     SCOREBOARD_URL,
     Game,
     get_todays_games,
@@ -12,7 +12,7 @@ from messy_weather_nfl_bot.schedule import (
     skip_reason,
     venue_drift,
 )
-from messy_weather_nfl_bot.stadiums import stadium_for_team
+from messy_weather_sports_bot.stadiums import stadium_for_team
 
 TARGET_DATE = dt.date(2026, 1, 18)
 
@@ -133,7 +133,7 @@ def test_renamed_venue_still_resolves_by_alias() -> None:
 def test_renamed_venue_resolves_by_stable_id_even_with_an_unknown_name(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from messy_weather_nfl_bot.stadiums import STADIUMS
+    from messy_weather_sports_bot.stadiums import STADIUMS
 
     gb_stadium = stadium_for_team("GB")
     monkeypatch.setitem(

@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from messy_weather_nfl_bot.alerts import SEVERITY_SCORE_BONUS, WeatherAlert, most_severe
-from messy_weather_nfl_bot.schedule import Game
-from messy_weather_nfl_bot.weather import WeatherReport
+from messy_weather_sports_bot.alerts import SEVERITY_SCORE_BONUS, WeatherAlert, most_severe
+from messy_weather_sports_bot.schedule import Game
+from messy_weather_sports_bot.weather import WeatherReport
 
 HIGH_WIND_MPH = 20.0
 # Extreme cold and heat are judged on how it feels (WeatherReport.feels_like_f), not the

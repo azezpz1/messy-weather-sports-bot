@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot.alerts import (
+from messy_weather_sports_bot.alerts import (
     AlertSeverity,
     WeatherAlert,
     classify_severity,

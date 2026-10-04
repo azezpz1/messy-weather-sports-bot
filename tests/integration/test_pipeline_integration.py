@@ -5,7 +5,7 @@ import logging
 
 import pytest
 
-from messy_weather_nfl_bot.main import EXIT_OK, EXIT_PARTIAL, run
+from messy_weather_sports_bot.main import EXIT_OK, EXIT_PARTIAL, run
 
 
 @pytest.mark.integration
@@ -19,7 +19,7 @@ def test_full_pipeline_runs_against_real_apis_without_posting_anywhere(
     # (a real failure would be EXIT_NOTHING_POSTED or an exception). The
     # per-game include/skip lines are INFO, below pytest's default capture level -
     # without them, a failure here doesn't say which game or API response caused it.
-    caplog.set_level(logging.INFO, logger="messy_weather_nfl_bot")
+    caplog.set_level(logging.INFO, logger="messy_weather_sports_bot")
     exit_code = run(platform_names=[], dry_run=True)
     assert exit_code in (EXIT_OK, EXIT_PARTIAL), (
         f"run() exited {exit_code}; its log:\n{caplog.text}"

@@ -1,6 +1,6 @@
 import pytest
 
-from messy_weather_nfl_bot.stadiums import STADIUMS, stadium_for_team, stadium_for_venue
+from messy_weather_sports_bot.stadiums import STADIUMS, stadium_for_team, stadium_for_venue
 
 
 def test_all_32_teams_present() -> None:
