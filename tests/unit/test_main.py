@@ -6,7 +6,7 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot.main import (
+from messy_weather_sports_bot.main import (
     EXIT_NOTHING_POSTED,
     EXIT_OK,
     EXIT_PARTIAL,
@@ -16,10 +16,10 @@ from messy_weather_nfl_bot.main import (
     parse_args,
     run,
 )
-from messy_weather_nfl_bot.schedule import SCOREBOARD_URL
-from messy_weather_nfl_bot.weather import nws_point
+from messy_weather_sports_bot.schedule import SCOREBOARD_URL
+from messy_weather_sports_bot.weather import nws_point
 
-LOGGER_NAME = "messy_weather_nfl_bot"
+LOGGER_NAME = "messy_weather_sports_bot"
 
 GB_LAT, GB_LON = 44.5013, -88.0622
 BUF_LAT, BUF_LON = 42.77306, -78.79222
@@ -34,7 +34,7 @@ def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _fixed_today(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("messy_weather_nfl_bot.main.todays_local_date", lambda: TARGET_DATE)
+    monkeypatch.setattr("messy_weather_sports_bot.main.todays_local_date", lambda: TARGET_DATE)
 
 
 @pytest.fixture(autouse=True)
@@ -221,7 +221,7 @@ def test_a_failed_alert_lookup_does_not_skip_the_game(capsys: pytest.CaptureFixt
 def test_one_poster_failing_still_lets_the_others_post(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+    from messy_weather_sports_bot.poster.base import PostRef, SocialMediaPoster
 
     class BrokenPoster(SocialMediaPoster):
         def post(self, text: str) -> PostRef:
@@ -242,7 +242,7 @@ def test_one_poster_failing_still_lets_the_others_post(
             return PostRef(id="2", root_id=parent.root_id)
 
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_posters",
+        "messy_weather_sports_bot.main.build_posters",
         lambda platform_names, dry_run: [BrokenPoster(), RecordingPoster()],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
@@ -262,7 +262,7 @@ def test_a_partially_posted_thread_is_partial_not_nothing_posted(
 ) -> None:
     # If the root of a thread published before a later reply failed, the poster did
     # publish something - that must not be reported as EXIT_NOTHING_POSTED.
-    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+    from messy_weather_sports_bot.poster.base import PostRef, SocialMediaPoster
 
     class FailsAfterRootPost(SocialMediaPoster):
         def post(self, text: str) -> PostRef:
@@ -272,13 +272,13 @@ def test_a_partially_posted_thread_is_partial_not_nothing_posted(
             raise RuntimeError("platform outage")
 
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_posters",
+        "messy_weather_sports_bot.main.build_posters",
         lambda platform_names, dry_run: [FailsAfterRootPost()],
     )
     # Force a multi-post thread (root + reply) regardless of formatting specifics -
     # what's under test here is the poster/exit-code interaction, not chunking.
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_post_texts",
+        "messy_weather_sports_bot.main.build_post_texts",
         lambda ranked, date: ["root post", "reply post"],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
@@ -364,7 +364,7 @@ def test_a_day_with_no_messy_games_posts_nothing_and_is_ok(
     def _no_posters(platform_names, dry_run):
         raise AssertionError("nothing should be posted on a nice-weather day")
 
-    monkeypatch.setattr("messy_weather_nfl_bot.main.build_posters", _no_posters)
+    monkeypatch.setattr("messy_weather_sports_bot.main.build_posters", _no_posters)
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
     _mock_hourly_forecast(GB_LAT, GB_LON, response=_clear_period_response())
     _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_clear_period_response())
@@ -486,7 +486,7 @@ def test_an_unhandled_exception_still_sends_a_failure_ping(
         return_value=httpx.Response(200)
     )
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.run",
+        "messy_weather_sports_bot.main.run",
         lambda platform_names, dry_run, force, date: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
@@ -496,7 +496,7 @@ def test_an_unhandled_exception_still_sends_a_failure_ping(
     assert end_route.called
 
 
-INSTALLED_VERSION = importlib.metadata.version("messy-weather-nfl-bot")
+INSTALLED_VERSION = importlib.metadata.version("messy-weather-sports-bot")
 
 
 @respx.mock
@@ -508,7 +508,9 @@ def test_the_running_version_is_logged_first(caplog: pytest.LogCaptureFixture) -
 
     main(["--dry-run"])
 
-    assert caplog.records[0].getMessage() == f"messy-weather-nfl-bot {INSTALLED_VERSION} starting"
+    assert (
+        caplog.records[0].getMessage() == f"messy-weather-sports-bot {INSTALLED_VERSION} starting"
+    )
 
 
 @respx.mock
@@ -523,7 +525,7 @@ def test_the_healthcheck_completion_body_includes_the_running_version(
     main(["--dry-run"])
 
     body = end_route.calls.last.request.content.decode()
-    assert f"messy-weather-nfl-bot {INSTALLED_VERSION} starting" in body
+    assert f"messy-weather-sports-bot {INSTALLED_VERSION} starting" in body
 
 
 @respx.mock
@@ -536,7 +538,7 @@ def test_the_failure_ping_after_a_crash_includes_the_running_version(
         return_value=httpx.Response(200)
     )
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.run",
+        "messy_weather_sports_bot.main.run",
         lambda platform_names, dry_run, force, date: (_ for _ in ()).throw(RuntimeError("boom")),
     )
 
@@ -544,7 +546,7 @@ def test_the_failure_ping_after_a_crash_includes_the_running_version(
         main(["--dry-run"])
 
     body = end_route.calls.last.request.content.decode()
-    assert f"messy-weather-nfl-bot {INSTALLED_VERSION} starting" in body
+    assert f"messy-weather-sports-bot {INSTALLED_VERSION} starting" in body
 
 
 @respx.mock
@@ -561,7 +563,7 @@ def test_an_uninstalled_package_logs_an_unknown_version_instead_of_crashing(
     monkeypatch.setattr("importlib.metadata.version", _not_installed)
 
     assert main(["--dry-run"]) == EXIT_OK
-    assert "messy-weather-nfl-bot (unknown version) starting" in caplog.text
+    assert "messy-weather-sports-bot (unknown version) starting" in caplog.text
 
 
 def test_verbose_and_quiet_are_mutually_exclusive() -> None:
@@ -611,7 +613,7 @@ def test_run_summary_is_logged_even_when_the_schedule_fetch_fails(
 def test_running_twice_posts_once_and_the_second_run_skips(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+    from messy_weather_sports_bot.poster.base import PostRef, SocialMediaPoster
 
     post_calls = {"count": 0}
 
@@ -625,7 +627,7 @@ def test_running_twice_posts_once_and_the_second_run_skips(
             return PostRef(id=f"reply-{post_calls['count']}", root_id=parent.root_id)
 
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_posters",
+        "messy_weather_sports_bot.main.build_posters",
         lambda platform_names, dry_run: [RecordingPoster()],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
@@ -647,7 +649,7 @@ def test_running_twice_posts_once_and_the_second_run_skips(
 def test_force_reposts_even_though_todays_thread_already_finished(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+    from messy_weather_sports_bot.poster.base import PostRef, SocialMediaPoster
 
     post_calls = {"count": 0}
 
@@ -661,7 +663,7 @@ def test_force_reposts_even_though_todays_thread_already_finished(
             return PostRef(id=f"reply-{post_calls['count']}", root_id=parent.root_id)
 
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_posters",
+        "messy_weather_sports_bot.main.build_posters",
         lambda platform_names, dry_run: [RecordingPoster()],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
@@ -680,7 +682,11 @@ def test_force_reposts_even_though_todays_thread_already_finished(
 def test_a_partial_thread_resumes_from_the_last_successful_post_on_rerun(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from messy_weather_nfl_bot.poster.base import PUBLISH_MAX_ATTEMPTS, PostRef, SocialMediaPoster
+    from messy_weather_sports_bot.poster.base import (
+        PUBLISH_MAX_ATTEMPTS,
+        PostRef,
+        SocialMediaPoster,
+    )
 
     posted_texts: list[str] = []
 
@@ -705,11 +711,11 @@ def test_a_partial_thread_resumes_from_the_last_successful_post_on_rerun(
 
     poster = FailsFirstRepliesThenWorks()
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_posters",
+        "messy_weather_sports_bot.main.build_posters",
         lambda platform_names, dry_run: [poster],
     )
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_post_texts",
+        "messy_weather_sports_bot.main.build_post_texts",
         lambda ranked, date: ["root post", "reply 1", "reply 2"],
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
@@ -746,7 +752,7 @@ def test_a_state_write_failure_does_not_change_the_posting_outcome(
     # A successful post must count as posted even if persisting that fact to disk
     # fails (a full disk, a read-only state dir) - the post already went out for
     # real, regardless of whether the state write did.
-    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+    from messy_weather_sports_bot.poster.base import PostRef, SocialMediaPoster
 
     class RecordingPoster(SocialMediaPoster):
         def post(self, text: str) -> PostRef:
@@ -756,14 +762,14 @@ def test_a_state_write_failure_does_not_change_the_posting_outcome(
             return PostRef(id="reply", root_id=parent.root_id)
 
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_posters",
+        "messy_weather_sports_bot.main.build_posters",
         lambda platform_names, dry_run: [RecordingPoster()],
     )
 
     def _broken_record(self, name, posts, *, completed):
         raise OSError("disk full")
 
-    monkeypatch.setattr("messy_weather_nfl_bot.state.DayState.record", _broken_record)
+    monkeypatch.setattr("messy_weather_sports_bot.state.DayState.record", _broken_record)
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
     _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
     _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
@@ -782,7 +788,7 @@ def test_a_state_write_failure_after_a_partial_thread_does_not_escape_run(
     # Same as above, but for the other call site: recording state after a
     # PartialThreadError must not let an OSError there propagate out of run() -
     # the partial-posting outcome already happened for real.
-    from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+    from messy_weather_sports_bot.poster.base import PostRef, SocialMediaPoster
 
     class FailsAfterRootPost(SocialMediaPoster):
         def post(self, text: str) -> PostRef:
@@ -792,18 +798,18 @@ def test_a_state_write_failure_after_a_partial_thread_does_not_escape_run(
             raise RuntimeError("platform outage")
 
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_posters",
+        "messy_weather_sports_bot.main.build_posters",
         lambda platform_names, dry_run: [FailsAfterRootPost()],
     )
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.build_post_texts",
+        "messy_weather_sports_bot.main.build_post_texts",
         lambda ranked, date: ["root post", "reply post"],
     )
 
     def _broken_record(self, name, posts, *, completed):
         raise OSError("disk full")
 
-    monkeypatch.setattr("messy_weather_nfl_bot.state.DayState.record", _broken_record)
+    monkeypatch.setattr("messy_weather_sports_bot.state.DayState.record", _broken_record)
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
     _mock_hourly_forecast(GB_LAT, GB_LON, response=_rainy_period_response())
     _mock_hourly_forecast(BUF_LAT, BUF_LON, response=_rainy_period_response())
@@ -853,7 +859,7 @@ def test_another_date_is_forced_to_dry_run(
     caplog.set_level(logging.INFO, logger=LOGGER_NAME)
     # "Today" is a different day from the (mocked) game day being previewed.
     monkeypatch.setattr(
-        "messy_weather_nfl_bot.main.todays_local_date",
+        "messy_weather_sports_bot.main.todays_local_date",
         lambda: TARGET_DATE + dt.timedelta(days=1),
     )
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
@@ -865,7 +871,7 @@ def test_another_date_is_forced_to_dry_run(
         dry_run_seen.append(dry_run)
         return []
 
-    monkeypatch.setattr("messy_weather_nfl_bot.main.build_posters", _capture_posters)
+    monkeypatch.setattr("messy_weather_sports_bot.main.build_posters", _capture_posters)
 
     run(platform_names=["bluesky"], dry_run=False, date=TARGET_DATE)
 

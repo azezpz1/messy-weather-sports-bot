@@ -8,8 +8,8 @@ from zoneinfo import ZoneInfo
 
 import httpx
 
-from messy_weather_nfl_bot.retry import request_with_retry
-from messy_weather_nfl_bot.stadiums import StadiumInfo, stadium_for_team, stadium_for_venue
+from messy_weather_sports_bot.retry import request_with_retry
+from messy_weather_sports_bot.stadiums import StadiumInfo, stadium_for_team, stadium_for_venue
 
 SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 

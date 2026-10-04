@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from messy_weather_nfl_bot import state
-from messy_weather_nfl_bot.poster.base import PostRef
+from messy_weather_sports_bot import state
+from messy_weather_sports_bot.poster.base import PostRef
 
 
 def test_default_state_dir_uses_override_env_var(monkeypatch: pytest.MonkeyPatch) -> None:

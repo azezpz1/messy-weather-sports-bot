@@ -4,7 +4,7 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_nfl_bot import healthcheck
+from messy_weather_sports_bot import healthcheck
 
 BASE_URL = "https://hc-ping.com/test-uuid"
 

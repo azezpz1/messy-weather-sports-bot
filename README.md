@@ -48,7 +48,7 @@ condition. Ice and snow carry by far the biggest bonuses, and heavy or blowing
 precipitation earns extra - but a precipitation bonus is scaled by its chance,
 so a likely snow game tops the list while a 30% chance of flurries ranks below
 a likely thunderstorm with 30 mph winds. The thresholds and weights live at
-the top of `src/messy_weather_nfl_bot/messiness.py`.
+the top of `src/messy_weather_sports_bot/messiness.py`.
 
 Games in domed, fixed-roof, or retractable-roof stadiums are skipped, since
 roof status isn't reliably knowable ahead of time. If there are no outdoor
@@ -113,7 +113,7 @@ uv run messy-weather-nfl-bot --force
 ```
 
 Every run starts by logging the installed version (e.g.
-`messy-weather-nfl-bot 2.0.1 starting`), so a log - or a Healthchecks.io ping
+`messy-weather-sports-bot 2.0.1 starting`), so a log - or a Healthchecks.io ping
 body - always says which release produced it. It then logs why each game found
 for the day was included or skipped (a covered stadium, an international venue,
 an unrecognized venue, a forecast that couldn't be fetched, or weather that
@@ -271,7 +271,7 @@ repository secret to be provisioned by a maintainer.
 
 ### Stadium data
 
-`src/messy_weather_nfl_bot/stadiums.py` has each team's usual venue -
+`src/messy_weather_sports_bot/stadiums.py` has each team's usual venue -
 coordinates and whether it's covered. Games are matched against *all* known
 stadiums (by ESPN's venue id, current name, or a listed alias), not just the
 home team's, so a relocated game or a renamed venue still resolves; a venue

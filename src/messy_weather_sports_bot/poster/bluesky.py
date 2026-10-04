@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from atproto import Client, models
 from atproto.exceptions import RateLimitExceededError, RequestErrorBase
 
-from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+from messy_weather_sports_bot.poster.base import PostRef, SocialMediaPoster
 
 HANDLE_ENV_VAR = "BLUESKY_HANDLE"
 APP_PASSWORD_ENV_VAR = "BLUESKY_APP_PASSWORD"

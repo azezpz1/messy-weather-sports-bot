@@ -9,7 +9,7 @@ on:
   # on ESPN being reachable (see the note on unit tests in ci.yml).
   pull_request:
     paths:
-      - src/messy_weather_nfl_bot/stadiums.py
+      - src/messy_weather_sports_bot/stadiums.py
       - scripts/check_venue_drift.py
       - .github/workflows/venue-drift-check.yml
   workflow_dispatch: {}

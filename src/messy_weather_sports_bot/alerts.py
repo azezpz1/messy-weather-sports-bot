@@ -8,8 +8,8 @@ from enum import IntEnum
 
 import httpx
 
-from messy_weather_nfl_bot.retry import request_with_retry
-from messy_weather_nfl_bot.weather import GAME_DURATION, USER_AGENT, nws_point
+from messy_weather_sports_bot.retry import request_with_retry
+from messy_weather_sports_bot.weather import GAME_DURATION, USER_AGENT, nws_point
 
 ALERTS_URL = "https://api.weather.gov/alerts/active?point={point}"
 

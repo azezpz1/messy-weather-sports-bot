@@ -14,7 +14,7 @@ import uuid
 
 import httpx
 
-from messy_weather_nfl_bot.retry import request_with_retry
+from messy_weather_sports_bot.retry import request_with_retry
 
 logger = logging.getLogger(__name__)
 

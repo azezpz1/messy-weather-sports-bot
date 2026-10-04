@@ -5,8 +5,8 @@ from atproto import Client
 from atproto.exceptions import InvokeTimeoutError, NetworkError, RateLimitExceededError
 from atproto_client.request import Response
 
-from messy_weather_nfl_bot.poster.base import PartialThreadError, PostRef
-from messy_weather_nfl_bot.poster.bluesky import MAX_RATE_LIMIT_WAIT_SECONDS, BlueskyPoster
+from messy_weather_sports_bot.poster.base import PartialThreadError, PostRef
+from messy_weather_sports_bot.poster.bluesky import MAX_RATE_LIMIT_WAIT_SECONDS, BlueskyPoster
 
 
 def _rate_limit_error(headers: dict[str, str]) -> RateLimitExceededError:

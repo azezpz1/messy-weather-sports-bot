@@ -2,7 +2,7 @@
 
 Recommends NFL games worth watching because the weather will be messy, and
 posts them to Bluesky. Python (`uv`-managed), source in
-`src/messy_weather_nfl_bot/`, tests in `tests/unit/` and `tests/integration/`.
+`src/messy_weather_sports_bot/`, tests in `tests/unit/` and `tests/integration/`.
 See `README.md` for user-facing docs; this file is about *working on* the repo.
 
 ## What this app is for

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import itertools
 
-from messy_weather_nfl_bot.poster.base import PostRef, SocialMediaPoster
+from messy_weather_sports_bot.poster.base import PostRef, SocialMediaPoster
 
 
 class ConsolePoster(SocialMediaPoster):

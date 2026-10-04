@@ -4,9 +4,9 @@ import datetime as dt
 
 import pytest
 
-from messy_weather_nfl_bot.alerts import get_active_alerts
-from messy_weather_nfl_bot.stadiums import stadium_for_team
-from messy_weather_nfl_bot.weather import get_forecast
+from messy_weather_sports_bot.alerts import get_active_alerts
+from messy_weather_sports_bot.stadiums import stadium_for_team
+from messy_weather_sports_bot.weather import get_forecast
 
 
 @pytest.mark.integration

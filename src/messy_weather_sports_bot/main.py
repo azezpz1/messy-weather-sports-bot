@@ -14,21 +14,21 @@ from collections.abc import Sequence
 
 import httpx
 
-from messy_weather_nfl_bot import healthcheck, state
-from messy_weather_nfl_bot.alerts import WeatherAlert, get_active_alerts
-from messy_weather_nfl_bot.formatting import build_post_texts, format_kickoff
-from messy_weather_nfl_bot.messiness import GameWeather, evaluate_game, sort_by_messiness
-from messy_weather_nfl_bot.poster import POSTERS
-from messy_weather_nfl_bot.poster.base import PartialThreadError, SocialMediaPoster
-from messy_weather_nfl_bot.poster.console import ConsolePoster
-from messy_weather_nfl_bot.schedule import get_todays_games, skip_reason, todays_local_date
-from messy_weather_nfl_bot.weather import USER_AGENT, WeatherReport, get_forecast
+from messy_weather_sports_bot import healthcheck, state
+from messy_weather_sports_bot.alerts import WeatherAlert, get_active_alerts
+from messy_weather_sports_bot.formatting import build_post_texts, format_kickoff
+from messy_weather_sports_bot.messiness import GameWeather, evaluate_game, sort_by_messiness
+from messy_weather_sports_bot.poster import POSTERS
+from messy_weather_sports_bot.poster.base import PartialThreadError, SocialMediaPoster
+from messy_weather_sports_bot.poster.console import ConsolePoster
+from messy_weather_sports_bot.schedule import get_todays_games, skip_reason, todays_local_date
+from messy_weather_sports_bot.weather import USER_AGENT, WeatherReport, get_forecast
 
-logger = logging.getLogger("messy_weather_nfl_bot")
+logger = logging.getLogger("messy_weather_sports_bot")
 
 LOG_FORMAT = "%(asctime)s %(levelname)-8s %(message)s"
 
-DISTRIBUTION_NAME = "messy-weather-nfl-bot"
+DISTRIBUTION_NAME = "messy-weather-sports-bot"
 
 # So cron wrappers and health checks can tell "nothing posted" from "posted, but
 # degraded" from a clean run.

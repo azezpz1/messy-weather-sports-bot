@@ -21,7 +21,7 @@ import sys
 
 import httpx
 
-from messy_weather_nfl_bot.schedule import get_todays_games, todays_local_date, venue_drift
+from messy_weather_sports_bot.schedule import get_todays_games, todays_local_date, venue_drift
 
 DAYS_TO_CHECK = 8
 """A week ahead plus one day of slack, so a weekly cron catches every game at
@@ -51,7 +51,9 @@ def main() -> int:
         print(f"\n{len(drift)} venue(s) not recognized in stadiums.py:", file=sys.stderr)
         for reason in drift:
             print(f"  - {reason}", file=sys.stderr)
-        print("\nUpdate src/messy_weather_nfl_bot/stadiums.py with the new venue.", file=sys.stderr)
+        print(
+            "\nUpdate src/messy_weather_sports_bot/stadiums.py with the new venue.", file=sys.stderr
+        )
         return 1
 
     print("No venue drift detected.")
