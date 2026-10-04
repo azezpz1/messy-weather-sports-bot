@@ -40,10 +40,14 @@ class VenueCatalog:
     a home team's own venue after ESPN renames it, as long as the id matches or the new
     name has been added as an alias.
 
-    Where two stadiums share an id or a name (two teams listing the same building),
-    the one that comes first in `stadiums` wins. `by_team` optionally maps a team
-    abbreviation to its usual stadium, for the fallback when ESPN omits a game's venue
-    entirely; it is built into the catalog, so changing the mapping later has no effect.
+    An id is unique; if two stadiums share one, the first wins. A *name* can be shared:
+    two teams listing the same building (the NFL's LAC/LAR) are the same stadium, but
+    many towns have a "Memorial Stadium", so a name that belongs to stadiums in
+    different places matches none of them - a lookup by that name alone would be a guess
+    at which town's weather to report, and reporting it as unrecognized is safer.
+    `by_team` optionally maps a team abbreviation to its usual stadium, for the fallback
+    when ESPN omits a game's venue entirely; it is built into the catalog, so changing
+    the mapping later has no effect.
     """
 
     def __init__(
@@ -53,13 +57,15 @@ class VenueCatalog:
         by_team: Mapping[str, StadiumInfo] | None = None,
     ) -> None:
         self._by_id: dict[str, StadiumInfo] = {}
-        self._by_name: dict[str, StadiumInfo] = {}
+        self._by_name: dict[str, StadiumInfo | None] = {}
+        """None marks a name shared by stadiums in different places."""
         for stadium in stadiums:
             if stadium.venue_id:
                 self._by_id.setdefault(stadium.venue_id, stadium)
-            self._by_name.setdefault(stadium.name, stadium)
-            for alias in stadium.aliases:
-                self._by_name.setdefault(alias, stadium)
+            for name in (stadium.name, *stadium.aliases):
+                known = self._by_name.setdefault(name, stadium)
+                if known is not None and _location(known) != _location(stadium):
+                    self._by_name[name] = None
         self._by_team = dict(by_team or {})
 
     def for_team(self, team_abbreviation: str) -> StadiumInfo:
@@ -76,7 +82,11 @@ class VenueCatalog:
         return None
 
 
-def _is_confirmed_international(venue_address: dict) -> bool:
+def _location(stadium: StadiumInfo) -> tuple[float, float]:
+    return stadium.latitude, stadium.longitude
+
+
+def is_confirmed_international(venue_address: dict) -> bool:
     """True only when ESPN reports a non-US country. A *missing* country is
     deliberately not treated as international - it's ambiguous, and treating it as
     international would silently exclude an unrecognized US venue from
@@ -115,7 +125,7 @@ def resolve_venue(
                 stadium = catalog.for_team(home_team)
             except KeyError:
                 return None, f"unrecognized home team {home_team!r}", False
-        elif _is_confirmed_international(venue.get("address") or {}):
+        elif is_confirmed_international(venue.get("address") or {}):
             return None, f'international venue "{venue_name}"', False
         else:
             # A US (or unconfirmed-country) venue we don't have on file - likely a

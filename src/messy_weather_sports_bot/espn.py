@@ -15,6 +15,9 @@ from messy_weather_sports_bot.venues import VenueCatalog, resolve_venue
 logger = logging.getLogger(__name__)
 
 NFL_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
+CFB_SCOREBOARD_URL = (
+    "https://site.api.espn.com/apis/site/v2/sports/football/college-football/scoreboard"
+)
 
 
 class EspnScoreboard:

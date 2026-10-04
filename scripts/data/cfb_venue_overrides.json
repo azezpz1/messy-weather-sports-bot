@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "venues": {
+    "3615": {
+      "note": "Boston College's Alumni Stadium. ESPN's name is not found by OSM search, which lists the stadium under Brighton: OSM way 29585757.",
+      "latitude": 42.3351,
+      "longitude": -71.16631
+    },
+    "3619": {
+      "note": "ESPN's sponsor name for Arizona Stadium (Tucson), which OSM knows as Arizona Stadium: OSM way 31791120.",
+      "latitude": 32.22884,
+      "longitude": -110.94878,
+      "aliases": ["Arizona Stadium"]
+    },
+    "3666": {
+      "note": "ESPN's sponsor name for Cajun Field (Lafayette, LA), which OSM knows as Cajun Field: OSM way 462603637.",
+      "latitude": 30.21587,
+      "longitude": -92.04174,
+      "aliases": ["Cajun Field"]
+    },
+    "3715": {
+      "note": "ESPN's sponsor name for FAU Stadium (Boca Raton), which OSM knows as FAU Stadium: OSM way 342629210.",
+      "latitude": 26.37629,
+      "longitude": -80.10172,
+      "aliases": ["FAU Stadium"]
+    },
+    "3841": {
+      "note": "Michie Stadium at West Point. A search with ESPN's city finds an unrelated Shea Stadium; searching the name alone finds the right one: OSM way 187069060.",
+      "latitude": 41.3873,
+      "longitude": -73.96429
+    },
+    "3895": {
+      "note": "ESPN's new sponsor name for Rice Stadium (Houston), which OSM knows as Rice Stadium: OSM way 44885334.",
+      "latitude": 29.71632,
+      "longitude": -95.40932,
+      "aliases": ["Rice Stadium"]
+    },
+    "4728": {
+      "note": "TDECU Stadium (Houston). OSM does not tag the stadium itself; this is John O'Quinn Field, the football field inside it (OSM way 1350963741, a leisure=pitch), about 330 m from the US Census geocoder's point for the stadium's street address (3874 Holman St).",
+      "latitude": 29.722,
+      "longitude": -95.34918
+    },
+    "4899": {
+      "note": "Kennesaw State's stadium. ESPN calls it Walens Family Field at Fifth Third Stadium; OSM knows it as Fifth Third Bank Stadium: OSM way 246685669.",
+      "latitude": 34.02879,
+      "longitude": -84.5678,
+      "aliases": ["Fifth Third Bank Stadium"]
+    }
+  }
+}

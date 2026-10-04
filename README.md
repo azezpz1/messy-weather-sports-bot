@@ -294,6 +294,41 @@ itself. Run it locally with:
 uv run python scripts/check_venue_drift.py
 ```
 
+### College football venue data
+
+`src/messy_weather_sports_bot/data/cfb_venues.json` lists the venues FBS teams
+play at: ESPN's venue id, coordinates, and whether the field is covered. It is
+keyed by venue id (then name or alias), never by team, because college teams
+play at neutral sites, bowls and rivalry venues too often for "the home team's
+stadium" to be a safe guess. A name that belongs to different places (there are
+many "Memorial Stadium"s) is never matched by name alone.
+
+The file is generated, not edited by hand:
+
+```sh
+uv run python scripts/generate_cfb_venues.py --cache .cache/venue_geocode.json
+```
+
+It harvests the venues FBS teams played at over the last full season and this
+one so far from ESPN's scoreboards, then places each one: a venue that is also an
+NFL stadium copies the NFL table; otherwise it is geocoded with
+[Photon](https://photon.komoot.io) (OpenStreetMap data), accepting only a result
+in the venue's state whose name matches ESPN's (a partial match must also be in
+the right city) and whose OSM class is a stadium or sports ground. A venue
+ESPN reports as indoors is covered. Rows already in the table are kept, so a
+rerun only adds what's new (`--refresh` recomputes them). Read the printed report
+before committing: each added venue comes with a map link to check it against,
+and it lists any venue that couldn't be placed and any FBS team with no home
+field in the table. It exits 0 when everything was placed, 2 when something needs
+a person, and 1 on a network error.
+
+Corrections go in `scripts/data/cfb_venue_overrides.json` - coordinates, a roof
+that ESPN reports as open, aliases, an excluded venue, or a whole venue the
+scoreboards haven't shown yet - each with a `note` saying why, so a regeneration
+keeps them. Don't edit the JSON by hand: `tests/unit/test_cfb_venue_table.py`
+fails if the file isn't exactly what the generator writes. Rerun it at the start
+of each season for new stadiums and renames.
+
 ### Pre-commit hooks
 
 Optionally, install [pre-commit](https://pre-commit.com/) to run ruff (lint
