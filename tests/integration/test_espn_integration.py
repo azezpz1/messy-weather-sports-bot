@@ -4,7 +4,8 @@ import datetime as dt
 
 import pytest
 
-from messy_weather_sports_bot.schedule import get_todays_games
+from messy_weather_sports_bot.espn import EspnScoreboard
+from messy_weather_sports_bot.nfl import NFL
 
 # Super Bowl LVIII (Chiefs vs. 49ers), a fixed historical date guaranteed to have exactly
 # one NFL game, played at the (covered) Allegiant Stadium.
@@ -13,7 +14,7 @@ KNOWN_GAME_DATE = dt.date(2024, 2, 11)
 
 @pytest.mark.integration
 def test_fetches_and_parses_a_known_historical_slate() -> None:
-    games = get_todays_games(KNOWN_GAME_DATE)
+    games = EspnScoreboard(NFL).fetch(KNOWN_GAME_DATE)
 
     assert len(games) == 1
     game = games[0]
@@ -26,5 +27,5 @@ def test_fetches_and_parses_a_known_historical_slate() -> None:
 @pytest.mark.integration
 def test_date_with_no_nfl_games_returns_empty_list() -> None:
     # The NFL doesn't play in July.
-    games = get_todays_games(dt.date(2025, 7, 15))
+    games = EspnScoreboard(NFL).fetch(dt.date(2025, 7, 15))
     assert games == []

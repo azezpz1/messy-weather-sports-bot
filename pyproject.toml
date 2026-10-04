@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-messy-weather-nfl-bot = "messy_weather_sports_bot.main:main"
+messy-weather-nfl-bot = "messy_weather_sports_bot.nfl:main"
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.13.0"]

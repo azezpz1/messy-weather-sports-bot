@@ -6,7 +6,7 @@ import datetime as dt
 
 from messy_weather_sports_bot.alerts import AlertSeverity
 from messy_weather_sports_bot.messiness import EMOJI, GameWeather
-from messy_weather_sports_bot.schedule import GAME_DAY_TIMEZONE
+from messy_weather_sports_bot.sport import Sport
 
 # Bluesky's real limit is 300 graphemes; stay conservative since multi-codepoint emoji
 # can count as more than one grapheme and Python's len() undercounts that.
@@ -17,18 +17,18 @@ MAX_POST_LENGTH = 280
 FEELS_LIKE_MIN_DIFFERENCE_F = 5
 
 
-def format_kickoff(kickoff: dt.datetime) -> str:
-    """Kickoff time in the NFL's Eastern game-day timezone, e.g. "1:00pm ET"."""
-    local = kickoff.astimezone(GAME_DAY_TIMEZONE)
+def format_kickoff(kickoff: dt.datetime, sport: Sport) -> str:
+    """Kickoff time in the sport's game-day timezone, e.g. "1:00pm ET"."""
+    local = kickoff.astimezone(sport.game_day_timezone)
     hour = local.hour % 12 or 12
     period = "am" if local.hour < 12 else "pm"
-    return f"{hour}:{local.minute:02d}{period} ET"
+    return f"{hour}:{local.minute:02d}{period} {sport.timezone_label}"
 
 
-def format_game_line(gw: GameWeather) -> str:
+def format_game_line(gw: GameWeather, sport: Sport) -> str:
     emoji = EMOJI[gw.condition]
     weather = gw.weather
-    kickoff = format_kickoff(gw.game.kickoff)
+    kickoff = format_kickoff(gw.game.kickoff, sport)
     parts = [f"{weather.short_forecast}"]
     if weather.temperature_f is not None:
         temperature = f"{weather.temperature_f}°F"
@@ -42,7 +42,7 @@ def format_game_line(gw: GameWeather) -> str:
     if weather.wind_speed_mph > 0:
         parts.append(f"{weather.wind_speed_mph:g}mph wind")
     line = (
-        f"\U0001f3c8 {gw.game.away_team} @ {gw.game.home_team} ({kickoff}): "
+        f"{sport.game_emoji} {gw.game.away_team} @ {gw.game.home_team} ({kickoff}): "
         f"{emoji} {', '.join(parts)}"
     )
     if gw.alert is not None:
@@ -50,8 +50,8 @@ def format_game_line(gw: GameWeather) -> str:
     return line
 
 
-def format_header(date: dt.date, *, has_warning: bool = False) -> str:
-    header = f"\U0001f329️ Messy NFL games to watch — {date:%a %b} {date.day}"
+def format_header(date: dt.date, sport: Sport, *, has_warning: bool = False) -> str:
+    header = f"{sport.header_emoji} {sport.header_title} — {date:%a %b} {date.day}"
     if has_warning:
         header += " ⚠️ Alerts in effect"
     return header
@@ -64,7 +64,7 @@ def _truncate(text: str, max_length: int) -> str:
 
 
 def build_post_texts(
-    games: list[GameWeather], date: dt.date, max_length: int = MAX_POST_LENGTH
+    games: list[GameWeather], date: dt.date, sport: Sport, max_length: int = MAX_POST_LENGTH
 ) -> list[str]:
     """Build one or more post texts (a thread) covering every game, each within max_length."""
     if not games:
@@ -73,7 +73,7 @@ def build_post_texts(
     has_warning = any(
         gw.alert is not None and gw.alert.severity is AlertSeverity.WARNING for gw in games
     )
-    header = format_header(date, has_warning=has_warning)
+    header = format_header(date, sport, has_warning=has_warning)
     # Reserve room for the header so it always fits alongside at least one game line -
     # otherwise a single oversized line could force a header-only first post.
     line_budget = max_length - len(header) - 1
@@ -82,7 +82,7 @@ def build_post_texts(
             f"max_length={max_length} is too small to fit the header ({len(header)} chars) "
             "plus at least one game line"
         )
-    lines = [_truncate(format_game_line(gw), line_budget) for gw in games]
+    lines = [_truncate(format_game_line(gw, sport), line_budget) for gw in games]
 
     chunks: list[str] = []
     current: list[str] = [header]

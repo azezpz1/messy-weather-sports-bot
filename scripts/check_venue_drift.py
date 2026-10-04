@@ -21,7 +21,9 @@ import sys
 
 import httpx
 
-from messy_weather_sports_bot.schedule import get_todays_games, todays_local_date, venue_drift
+from messy_weather_sports_bot.espn import EspnScoreboard
+from messy_weather_sports_bot.nfl import NFL
+from messy_weather_sports_bot.schedule import todays_game_day, venue_drift
 
 DAYS_TO_CHECK = 8
 """A week ahead plus one day of slack, so a weekly cron catches every game at
@@ -29,15 +31,16 @@ least once even if a run is skipped or shifts by a day."""
 
 
 def main() -> int:
-    start = todays_local_date()
+    start = todays_game_day(NFL)
     drift: list[str] = []
     games_checked = 0
 
     with httpx.Client(timeout=10.0) as client:
+        scoreboard = EspnScoreboard(NFL, client)
         for offset in range(DAYS_TO_CHECK):
             date = start + dt.timedelta(days=offset)
             try:
-                games = get_todays_games(date, client=client)
+                games = scoreboard.fetch(date)
             except (httpx.HTTPError, ValueError) as exc:
                 print(f"error: could not fetch schedule for {date}: {exc}", file=sys.stderr)
                 return 1

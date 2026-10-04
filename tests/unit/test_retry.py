@@ -9,12 +9,6 @@ from messy_weather_sports_bot.retry import _retry_after_seconds, request_with_re
 URL = "https://example.test/thing"
 
 
-@pytest.fixture(autouse=True)
-def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Keep the test suite fast - backoff timing itself isn't under test here.
-    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
-
-
 def _response(status: int, headers: dict[str, str] | None = None) -> httpx.Response:
     return httpx.Response(status, headers=headers, request=httpx.Request("GET", URL))
 

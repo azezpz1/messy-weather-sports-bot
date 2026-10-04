@@ -9,7 +9,7 @@ import tomllib
 from pathlib import Path
 
 import messy_weather_sports_bot
-from messy_weather_sports_bot.main import DISTRIBUTION_NAME, logger
+from messy_weather_sports_bot.cli import DISTRIBUTION_NAME, logger
 
 PYPROJECT = tomllib.loads((Path(__file__).parents[2] / "pyproject.toml").read_text())
 

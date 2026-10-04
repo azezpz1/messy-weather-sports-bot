@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Self
 
 from tenacity import (
     RetryCallState,
@@ -47,6 +48,14 @@ class PartialThreadError(Exception):
 
 
 class SocialMediaPoster(ABC):
+    @classmethod
+    def from_env(cls, env_prefix: str = "") -> Self:
+        """Build a poster from this process's environment. `env_prefix` is prepended to
+        the names of any environment variables it reads (credentials), so one sport can
+        post to a different account than another. Backends that read no environment
+        ignore it; the default is a plain no-argument construction."""
+        return cls()
+
     @abstractmethod
     def post(self, text: str) -> PostRef:
         """Publish a new top-level post and return a reference to it."""

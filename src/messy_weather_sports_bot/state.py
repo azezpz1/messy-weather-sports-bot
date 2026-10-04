@@ -39,8 +39,13 @@ def default_state_dir() -> Path:
     return base / _APP_DIR_NAME
 
 
-def state_file_path(date: dt.date, state_dir: Path | None = None) -> Path:
-    return (state_dir or default_state_dir()) / f"{date.isoformat()}.json"
+def state_file_path(
+    date: dt.date, state_dir: Path | None = None, *, sport_key: str | None = None
+) -> Path:
+    """The day's state file. A `sport_key` names it `<date>.<key>.json`, so two sports
+    posting on the same day keep separate progress; without one it is `<date>.json`."""
+    suffix = f".{sport_key}" if sport_key else ""
+    return (state_dir or default_state_dir()) / f"{date.isoformat()}{suffix}.json"
 
 
 class PlatformState:

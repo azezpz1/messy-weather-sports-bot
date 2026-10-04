@@ -26,6 +26,18 @@ every change to what gets posted:
 - **Word posts as recommendations** ("Messy NFL games to watch"), never as a
   forecast or weather report.
 
+## How the code is organized
+
+One pipeline serves every sport; a sport is a `Sport` configuration (`sport.py`): its
+scoreboard URL, game-day timezone, post wording, venue catalog, and the prefix on its
+credential/healthcheck environment variables and state file. `nfl.py` defines `NFL` and
+the `messy-weather-nfl-bot` entry point; `cli.py` and `pipeline.py` are the shared
+command line and game-day run, `espn.py` fetches a scoreboard, and `venues.py` resolves a
+game's venue. When something differs by sport, put it on `Sport` rather than branching on
+which sport it is. Tests share builders in `tests/support/` (ESPN and NWS payloads) and
+`tests/unit/conftest.py`; `tests/unit/test_golden_dry_run.py` locks the exact NFL output,
+so a refactor that changes it has changed behavior.
+
 ## Before every push
 
 Run `./scripts/check.sh` (see README's "Development" section for the

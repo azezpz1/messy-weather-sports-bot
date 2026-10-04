@@ -20,6 +20,13 @@ logger = logging.getLogger(__name__)
 
 ENV_VAR = "HEALTHCHECK_URL"
 
+
+def env_var_name(env_prefix: str = "") -> str:
+    """The environment variable holding a sport's check URL: `HEALTHCHECK_URL`, with
+    the sport's prefix in front (so each sport reports to its own check)."""
+    return f"{env_prefix}{ENV_VAR}"
+
+
 PING_TIMEOUT = 10.0
 PING_MAX_ATTEMPTS = 2
 

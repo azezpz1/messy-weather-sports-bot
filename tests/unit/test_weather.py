@@ -17,12 +17,6 @@ LAT, LON = 44.5013, -88.0622
 EASTERN = dt.timezone(dt.timedelta(hours=-5))  # EST, matches the fixture period offsets below
 
 
-@pytest.fixture(autouse=True)
-def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Keep the test suite fast - backoff timing is covered by tests/unit/test_retry.py.
-    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
-
-
 @pytest.mark.parametrize(
     ("wind_speed", "expected"),
     [

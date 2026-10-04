@@ -1,6 +1,9 @@
+import dataclasses
+
 import pytest
 
 from messy_weather_sports_bot.stadiums import STADIUMS, stadium_for_team, stadium_for_venue
+from messy_weather_sports_bot.venues import VenueCatalog
 
 
 def test_all_32_teams_present() -> None:
@@ -54,20 +57,10 @@ def test_houston_resolves_under_both_reliant_and_nrg_names() -> None:
     assert stadium_for_venue("", "NRG Stadium") is hou
 
 
-def test_stadium_for_venue_matches_by_id_even_with_unknown_name(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    ford_field = stadium_for_team("DET")
-    renamed = type(ford_field)(
-        ford_field.name,
-        ford_field.latitude,
-        ford_field.longitude,
-        ford_field.is_covered,
-        venue_id="3902",
-    )
-    monkeypatch.setitem(STADIUMS, "DET", renamed)
+def test_a_catalog_matches_by_id_even_with_an_unknown_name() -> None:
+    renamed = dataclasses.replace(stadium_for_team("DET"), venue_id="3902")
 
-    assert stadium_for_venue("3902", "Some Future Name") is renamed
+    assert VenueCatalog([renamed]).for_venue("3902", "Some Future Name") is renamed
 
 
 def test_stadium_for_venue_returns_none_for_unknown_venue() -> None:

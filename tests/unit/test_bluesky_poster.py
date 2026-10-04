@@ -24,11 +24,6 @@ class _DummyClient:
     client is injected, so passing one skips that entirely."""
 
 
-@pytest.fixture(autouse=True)
-def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
-
-
 def _poster() -> BlueskyPoster:
     return BlueskyPoster(client=t.cast(Client, _DummyClient()))
 
@@ -106,3 +101,58 @@ def test_retry_delay_is_none_for_non_rate_limit_errors() -> None:
     poster = _poster()
     assert poster._retry_delay(NetworkError()) is None
     assert poster._retry_delay(RuntimeError("unrelated")) is None
+
+
+class _LoginRecorder:
+    def __init__(self) -> None:
+        self.logins: list[tuple[str, str]] = []
+
+    def login(self, handle: str, password: str) -> None:
+        self.logins.append((handle, password))
+
+
+@pytest.fixture
+def login_recorder(monkeypatch: pytest.MonkeyPatch) -> _LoginRecorder:
+    recorder = _LoginRecorder()
+    monkeypatch.setattr("messy_weather_sports_bot.poster.bluesky.Client", lambda: recorder)
+    for name in ("BLUESKY_HANDLE", "BLUESKY_APP_PASSWORD", "CFB_BLUESKY_HANDLE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.delenv("CFB_BLUESKY_APP_PASSWORD", raising=False)
+    return recorder
+
+
+def test_from_env_with_no_prefix_reads_the_original_variable_names(
+    monkeypatch: pytest.MonkeyPatch, login_recorder: _LoginRecorder
+) -> None:
+    monkeypatch.setenv("BLUESKY_HANDLE", "first.example")
+    monkeypatch.setenv("BLUESKY_APP_PASSWORD", "placeholder-one")
+
+    BlueskyPoster.from_env()
+
+    assert login_recorder.logins == [("first.example", "placeholder-one")]
+
+
+def test_from_env_reads_only_the_prefixed_variables(
+    monkeypatch: pytest.MonkeyPatch, login_recorder: _LoginRecorder
+) -> None:
+    monkeypatch.setenv("BLUESKY_HANDLE", "first.example")
+    monkeypatch.setenv("BLUESKY_APP_PASSWORD", "placeholder-one")
+    monkeypatch.setenv("CFB_BLUESKY_HANDLE", "second.example")
+    monkeypatch.setenv("CFB_BLUESKY_APP_PASSWORD", "placeholder-two")
+
+    BlueskyPoster.from_env("CFB_")
+
+    assert login_recorder.logins == [("second.example", "placeholder-two")]
+
+
+def test_from_env_never_falls_back_to_the_unprefixed_credentials(
+    monkeypatch: pytest.MonkeyPatch, login_recorder: _LoginRecorder
+) -> None:
+    # Posting one sport's games to another sport's account would be worse than failing.
+    monkeypatch.setenv("BLUESKY_HANDLE", "first.example")
+    monkeypatch.setenv("BLUESKY_APP_PASSWORD", "placeholder-one")
+
+    with pytest.raises(KeyError, match="CFB_BLUESKY_HANDLE"):
+        BlueskyPoster.from_env("CFB_")
+
+    assert login_recorder.logins == []
