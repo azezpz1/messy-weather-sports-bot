@@ -107,7 +107,7 @@ EXPECTED_LOG_MESSAGES = [
 
 @respx.mock
 def test_nfl_dry_run_output_is_locked(
-    capsys: pytest.CaptureFixture, caplog: pytest.LogCaptureFixture
+    capsys: pytest.CaptureFixture, caplog: pytest.LogCaptureFixture, tmp_path
 ) -> None:
     respx.get(SCOREBOARD_URL).mock(
         return_value=httpx.Response(
@@ -124,3 +124,5 @@ def test_nfl_dry_run_output_is_locked(
     assert exit_code == EXIT_OK
     assert capsys.readouterr().out == EXPECTED_STDOUT
     assert [record.getMessage() for record in caplog.records] == EXPECTED_LOG_MESSAGES
+    # A dry run must never read or write post state (see state.py).
+    assert not (tmp_path / "state").exists()

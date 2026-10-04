@@ -66,14 +66,16 @@ uv sync
 
 Note the two different names: the checkout directory is
 `messy-weather-sports-bot` (the repo's name), while the command it installs is
-`messy-weather-nfl-bot`. Paths in crontab entries below need the directory
-name. A `cd` into a nonexistent `messy-weather-nfl-bot` directory fails before
-the command after it runs, and a `>> log 2>&1` at the end of the entry only
-captures that later command - so the failure never reaches the log, and an
-update job pointed at the wrong directory goes unnoticed while the checkout
-your posts run from never updates. The update entry below groups the whole
-command under one redirect, to a log outside the checkout, so a failed `cd`
-is logged too.
+`messy-weather-nfl-bot`. The installed package (and so the version line that
+starts every run's log) also uses the repo's name, `messy-weather-sports-bot`,
+not the command's - match on that if you grep logs for the version line. Paths
+in crontab entries below need the directory name. A `cd` into a nonexistent
+`messy-weather-nfl-bot` directory fails before the command after it runs, and a
+`>> log 2>&1` at the end of the entry only captures that later command - so the
+failure never reaches the log, and an update job pointed at the wrong directory
+goes unnoticed while the checkout your posts run from never updates. The update
+entry below groups the whole command under one redirect, to a log outside the
+checkout, so a failed `cd` is logged too.
 
 ## Configuration
 
