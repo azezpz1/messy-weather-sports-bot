@@ -917,3 +917,68 @@ def test_a_prefixed_sport_reports_to_its_own_healthcheck(monkeypatch: pytest.Mon
     assert other_start.called
     assert other_end.called
     assert not first_start.called
+
+
+@respx.mock
+def test_the_pipeline_builds_posters_with_the_sports_env_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefixes_seen: list[str] = []
+
+    def _capture_posters(platform_names: list[str], dry_run: bool, env_prefix: str) -> list:
+        prefixes_seen.append(env_prefix)
+        return []
+
+    monkeypatch.setattr("messy_weather_sports_bot.pipeline.build_posters", _capture_posters)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    mock_hourly_forecast(GB_LAT, GB_LON, response=rainy_period_response())
+    mock_hourly_forecast(BUF_LAT, BUF_LON, response=rainy_period_response())
+    other_sport = dataclasses.replace(NFL, slug="other", env_prefix="CFB_")
+
+    GameDayPipeline(other_sport).run(["bluesky"], dry_run=False)
+
+    assert prefixes_seen == ["CFB_"]
+
+
+@respx.mock
+def test_the_sports_game_duration_bounds_the_forecast_and_alert_windows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from messy_weather_sports_bot import pipeline
+
+    windows: list[tuple[str, dt.timedelta]] = []
+    real_get_forecast = pipeline.get_forecast
+    real_get_active_alerts = pipeline.get_active_alerts
+
+    def _spy_forecast(*args, **kwargs):
+        windows.append(("forecast", kwargs["game_duration"]))
+        return real_get_forecast(*args, **kwargs)
+
+    def _spy_alerts(*args, **kwargs):
+        windows.append(("alerts", kwargs["game_duration"]))
+        return real_get_active_alerts(*args, **kwargs)
+
+    monkeypatch.setattr("messy_weather_sports_bot.pipeline.get_forecast", _spy_forecast)
+    monkeypatch.setattr("messy_weather_sports_bot.pipeline.get_active_alerts", _spy_alerts)
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=_two_game_schedule()))
+    mock_hourly_forecast(GB_LAT, GB_LON, response=rainy_period_response())
+    mock_hourly_forecast(BUF_LAT, BUF_LON, response=rainy_period_response())
+    short_game = dt.timedelta(hours=1)
+
+    GameDayPipeline(dataclasses.replace(NFL, game_duration=short_game)).run([], dry_run=True)
+
+    assert {kind for kind, _ in windows} == {"forecast", "alerts"}
+    assert {duration for _, duration in windows} == {short_game}
+
+
+@respx.mock
+def test_the_pipeline_fetches_the_sports_own_scoreboard() -> None:
+    other_url = "https://example.test/other-sport/scoreboard"
+    route = respx.get(other_url).mock(return_value=httpx.Response(200, json={"events": []}))
+
+    exit_code = GameDayPipeline(dataclasses.replace(NFL, scoreboard_url=other_url)).run(
+        [], dry_run=True
+    )
+
+    assert route.called
+    assert exit_code == EXIT_OK

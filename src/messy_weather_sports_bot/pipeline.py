@@ -58,42 +58,6 @@ def _weather_detail(weather: WeatherReport) -> str:
     return ", ".join(parts)
 
 
-def _log_run_summary(
-    games_found: int | None,
-    outdoor_count: int,
-    evaluated_count: int,
-    messy_count: int,
-    platforms_posted: list[str],
-    thread_root: str | None,
-) -> None:
-    """`games_found` is None when the schedule couldn't be fetched at all - every other
-    exit path from `run()` calls this, so the healthcheck completion body always
-    carries a summary line."""
-    logger.info(
-        "Run summary: %s game(s) found, %d outdoor, %d evaluated, %d messy, platforms: %s%s",
-        "unavailable" if games_found is None else games_found,
-        outdoor_count,
-        evaluated_count,
-        messy_count,
-        ", ".join(platforms_posted) or "none",
-        f", thread: {thread_root}" if thread_root else "",
-    )
-
-
-def _record_state(
-    day_state: state.DayState | None, platform: str, refs: list[state.PostRef], *, completed: bool
-) -> None:
-    """Persist `refs` for `platform`, without letting a state-write failure (a full
-    disk, a read-only directory) change the posting outcome or escape `run()` -
-    `refs` already published successfully regardless of whether this write does."""
-    if day_state is None:
-        return
-    try:
-        day_state.record(platform, refs, completed=completed)
-    except OSError as exc:
-        logger.warning("Could not save post state for %s: %s", platform, exc)
-
-
 @dataclass
 class _Evaluation:
     evaluated: list[GameWeather] = field(default_factory=list)
@@ -113,6 +77,40 @@ class _Publication:
     platforms_failed: int = 0
     platforms_degraded: int = 0
     thread_root: str | None = None
+
+
+def _log_run_summary(
+    games_found: int | None,
+    evaluation: _Evaluation,
+    platforms_posted: list[str],
+    thread_root: str | None,
+) -> None:
+    """`games_found` is None when the schedule couldn't be fetched at all (pass an empty
+    `_Evaluation`) - every other exit path from `run()` calls this, so the healthcheck
+    completion body always carries a summary line."""
+    logger.info(
+        "Run summary: %s game(s) found, %d outdoor, %d evaluated, %d messy, platforms: %s%s",
+        "unavailable" if games_found is None else games_found,
+        evaluation.outdoor_count,
+        len(evaluation.evaluated),
+        len(evaluation.messy),
+        ", ".join(platforms_posted) or "none",
+        f", thread: {thread_root}" if thread_root else "",
+    )
+
+
+def _record_state(
+    day_state: state.DayState | None, platform: str, refs: list[state.PostRef], *, completed: bool
+) -> None:
+    """Persist `refs` for `platform`, without letting a state-write failure (a full
+    disk, a read-only directory) change the posting outcome or escape `run()` -
+    `refs` already published successfully regardless of whether this write does."""
+    if day_state is None:
+        return
+    try:
+        day_state.record(platform, refs, completed=completed)
+    except OSError as exc:
+        logger.warning("Could not save post state for %s: %s", platform, exc)
 
 
 class GameDayPipeline:
@@ -138,18 +136,15 @@ class GameDayPipeline:
             logger.error(
                 "Could not fetch the %s schedule for %s: %s", sport.name, date.isoformat(), exc
             )
-            _log_run_summary(None, 0, 0, 0, [], None)
+            _log_run_summary(None, _Evaluation(), [], None)
             return EXIT_NOTHING_POSTED
 
         evaluation = self._evaluate(games)
         messy = evaluation.messy
-        outdoor_count = evaluation.outdoor_count
 
-        if outdoor_count == 0:
+        if evaluation.outdoor_count == 0:
             logger.info("No outdoor %s games on %s; nothing to post.", sport.name, date.isoformat())
-            _log_run_summary(
-                len(games), outdoor_count, len(evaluation.evaluated), len(messy), [], None
-            )
+            _log_run_summary(len(games), evaluation, [], None)
             return EXIT_OK
 
         if not evaluation.evaluated:
@@ -157,16 +152,12 @@ class GameDayPipeline:
                 "Forecast unavailable for every outdoor game on %s; nothing to post.",
                 date.isoformat(),
             )
-            _log_run_summary(
-                len(games), outdoor_count, len(evaluation.evaluated), len(messy), [], None
-            )
+            _log_run_summary(len(games), evaluation, [], None)
             return EXIT_NOTHING_POSTED
 
         if not messy:
             logger.info("No messy-weather games on %s; nothing to post.", date.isoformat())
-            _log_run_summary(
-                len(games), outdoor_count, len(evaluation.evaluated), len(messy), [], None
-            )
+            _log_run_summary(len(games), evaluation, [], None)
             # A game whose forecast couldn't be fetched might have been the messy one.
             return EXIT_PARTIAL if evaluation.games_missing else EXIT_OK
 
@@ -195,12 +186,7 @@ class GameDayPipeline:
             exit_code = EXIT_OK
 
         _log_run_summary(
-            len(games),
-            outdoor_count,
-            len(evaluation.evaluated),
-            len(messy),
-            publication.platforms_posted,
-            publication.thread_root,
+            len(games), evaluation, publication.platforms_posted, publication.thread_root
         )
         return exit_code
 
@@ -208,17 +194,18 @@ class GameDayPipeline:
         """Look up the weather for every game that applies it to, and score it."""
         sport = self.sport
         evaluation = _Evaluation()
-        for game in games:
-            matchup = f"{game.away_team} @ {game.home_team}"
-            reason = skip_reason(game)
-            if reason is not None:
-                logger.info("%s — skipped: %s", matchup, reason)
-                continue
+        # One client for the whole slate, so the NWS connection is reused across games.
+        with httpx.Client(timeout=10.0, headers={"User-Agent": USER_AGENT}) as nws_client:
+            for game in games:
+                matchup = f"{game.away_team} @ {game.home_team}"
+                reason = skip_reason(game)
+                if reason is not None:
+                    logger.info("%s — skipped: %s", matchup, reason)
+                    continue
 
-            evaluation.outdoor_count += 1
-            assert game.stadium is not None  # guaranteed by skip_reason() returning None above
-            alerts: list[WeatherAlert] = []
-            with httpx.Client(timeout=10.0, headers={"User-Agent": USER_AGENT}) as nws_client:
+                evaluation.outdoor_count += 1
+                assert game.stadium is not None  # guaranteed by skip_reason() returning None
+                alerts: list[WeatherAlert] = []
                 try:
                     forecasts = get_forecast(
                         game.stadium.latitude,
@@ -245,19 +232,19 @@ class GameDayPipeline:
                     # no alert and scoring falls back to the forecast alone.
                     logger.info("%s — no alert data (%s)", matchup, exc)
 
-            gw = evaluate_game(game, forecasts, alerts)
-            evaluation.evaluated.append(gw)
-            period_word = "period" if len(forecasts) == 1 else "periods"
-            logger.info(
-                "%s %s — %s: score %.1f (%s) across %d hourly %s",
-                matchup,
-                format_kickoff(game.kickoff, sport),
-                "included" if gw.is_messy else "skipped: not messy",
-                gw.score,
-                _weather_detail(gw.weather),
-                len(forecasts),
-                period_word,
-            )
+                gw = evaluate_game(game, forecasts, alerts)
+                evaluation.evaluated.append(gw)
+                period_word = "period" if len(forecasts) == 1 else "periods"
+                logger.info(
+                    "%s %s — %s: score %.1f (%s) across %d hourly %s",
+                    matchup,
+                    format_kickoff(game.kickoff, sport),
+                    "included" if gw.is_messy else "skipped: not messy",
+                    gw.score,
+                    _weather_detail(gw.weather),
+                    len(forecasts),
+                    period_word,
+                )
         return evaluation
 
     def _publish(

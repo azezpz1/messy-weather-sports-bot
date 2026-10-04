@@ -35,8 +35,9 @@ class Sport:
     """The post header, worded as a recommendation: "Messy NFL games to watch"."""
     game_emoji: str
     venue_catalog: Callable[[], VenueCatalog]
-    """Called when a schedule is parsed, so a sport's venue data is only loaded (and
-    only able to fail) when that sport actually runs."""
+    """Called each time a schedule is parsed, so a sport may build its catalog on demand
+    rather than at import. (The NFL's is a module-level constant, built when `stadiums`
+    is first imported - which importing `nfl` already does.)"""
     env_prefix: str = ""
     """Prefix on this sport's environment variables (credentials, healthcheck URL), so
     sports can post to different accounts. Empty keeps the original, unprefixed names."""

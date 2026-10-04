@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import logging
 
 import httpx
 
@@ -10,6 +11,8 @@ from messy_weather_sports_bot.retry import request_with_retry
 from messy_weather_sports_bot.schedule import Game
 from messy_weather_sports_bot.sport import Sport
 from messy_weather_sports_bot.venues import VenueCatalog, resolve_venue
+
+logger = logging.getLogger(__name__)
 
 NFL_SCOREBOARD_URL = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard"
 
@@ -78,7 +81,18 @@ class EspnScoreboard:
         competition = competitions[0]
 
         kickoff = dt.datetime.fromisoformat(competition["date"].replace("Z", "+00:00"))
-        if self._sport.game_day_for(kickoff) != game_day:
+        try:
+            event_day = self._sport.game_day_for(kickoff)
+        except ValueError:
+            # A kickoff with no UTC offset is rejected rather than assumed to be in this
+            # machine's timezone, which could put the game on the wrong day. Skip just
+            # this event (and say which), so one odd entry doesn't cost the whole slate.
+            label = event.get("shortName") or event.get("name") or event.get("id")
+            logger.warning(
+                "Skipping ESPN event %r: its kickoff %r has no timezone", label, competition["date"]
+            )
+            return None
+        if event_day != game_day:
             return None
 
         competitors = competition.get("competitors") or []

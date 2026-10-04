@@ -400,9 +400,19 @@ def test_skip_reason_names_an_unrecognized_team() -> None:
 
 
 @respx.mock
-def test_a_kickoff_without_a_timezone_is_rejected_rather_than_assumed_local() -> None:
-    payload = {"events": [_event("GB", "CHI", "2026-01-18T18:00", "Lambeau Field")]}
+def test_a_kickoff_without_a_timezone_skips_only_that_event(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Rejected rather than assumed to be in the machine's timezone (which could put the
+    # game on the wrong day) - but one odd entry mustn't cost the rest of the slate.
+    odd = _event("BUF", "NE", "2026-01-18T18:00", "Highmark Stadium")
+    odd["shortName"] = "NE @ BUF"
+    payload = {"events": [odd, _event("GB", "CHI", "2026-01-18T18:00Z", "Lambeau Field")]}
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=payload))
 
-    with pytest.raises(ValueError, match="timezone-aware"):
-        get_todays_games(TARGET_DATE)
+    games = get_todays_games(TARGET_DATE)
+
+    assert [game.home_team for game in games] == ["GB"]
+    warning = next(r.getMessage() for r in caplog.records if r.levelname == "WARNING")
+    assert "'NE @ BUF'" in warning
+    assert "'2026-01-18T18:00'" in warning

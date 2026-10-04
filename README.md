@@ -274,19 +274,21 @@ repository secret to be provisioned by a maintainer.
 ### Stadium data
 
 `src/messy_weather_sports_bot/stadiums.py` has each team's usual venue -
-coordinates and whether it's covered. Games are matched against *all* known
-stadiums (by ESPN's venue id, current name, or a listed alias), not just the
-home team's, so a relocated game or a renamed venue still resolves; a venue
-alias should be added there when a stadium gets a new sponsor name. A US
-venue that doesn't match anything is skipped and logged as unrecognized
-rather than silently dropped.
+coordinates and whether it's covered. Games are matched (in
+`src/messy_weather_sports_bot/venues.py`) against *all* known stadiums (by
+ESPN's venue id, current name, or a listed alias), not just the home team's, so
+a relocated game or a renamed venue still resolves; a venue alias should be
+added in `stadiums.py` when a stadium gets a new sponsor name. A US venue that
+doesn't match anything is skipped and logged as unrecognized rather than
+silently dropped.
 
 The "Venue drift check" workflow (`.github/workflows/venue-drift-check.yml`)
 runs weekly during the season and fails if any upcoming US game's venue
 isn't recognized, so a stadium rename or relocation is caught before it
 quietly drops a team's home games. It also runs on pull requests that touch
-`stadiums.py`, the check script, or the workflow file itself. Run it locally
-with:
+`stadiums.py`, the code the check runs through (`venues.py`, `espn.py`,
+`schedule.py`, `sport.py`, `nfl.py`), the check script, or the workflow file
+itself. Run it locally with:
 
 ```sh
 uv run python scripts/check_venue_drift.py
