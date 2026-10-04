@@ -1,31 +1,13 @@
 """Static NFL stadium data: location and whether the field is shielded from weather.
 
-Covered stadiums (fixed domes, fixed/skylight roofs, and retractable roofs) are all
-treated as indoor, since roof-open/closed state on a retractable roof isn't reliably
-knowable ahead of a game from free data sources.
-
-Stadiums are looked up by ESPN's `competition.venue.id` first (stable across a venue
-rename), then by name - either the current `name` or a historical `aliases` entry -
-before falling back to the home team's usual venue. `venue_id` is left unset (`None`)
-until we've confirmed the real ESPN id for that venue (pulled from a live scoreboard
-response); until then, matching falls through to name/alias matching for that
-stadium.
+Lookup (by ESPN venue id, then name/alias, before falling back to the home team's usual
+venue) and the covered-stadium convention live in `venues.py`; this module is the NFL's
+data, built into `NFL_CATALOG`.
 """
 
-from dataclasses import dataclass, field
+from messy_weather_sports_bot.venues import StadiumInfo, VenueCatalog
 
-
-@dataclass(frozen=True)
-class StadiumInfo:
-    name: str
-    latitude: float
-    longitude: float
-    is_covered: bool
-    venue_id: str | None = None
-    aliases: tuple[str, ...] = field(default_factory=tuple)
-    """Past names ESPN may still report for this venue (e.g. a sponsor rename),
-    so a schedule fetched before `name` here is updated still resolves correctly."""
-
+__all__ = ["NFL_CATALOG", "STADIUMS", "StadiumInfo", "stadium_for_team", "stadium_for_venue"]
 
 # Keyed by ESPN team abbreviation.
 STADIUMS: dict[str, StadiumInfo] = {
@@ -127,29 +109,22 @@ STADIUMS: dict[str, StadiumInfo] = {
 }
 
 
+# Built once from STADIUMS, in table order: where two teams list the same building
+# (LAC/LAR, NYG/NYJ) a venue lookup returns the first team's entry.
+NFL_CATALOG = VenueCatalog(STADIUMS.values(), by_team=STADIUMS)
+
+
 def stadium_for_team(team_abbreviation: str) -> StadiumInfo:
     """Look up stadium info for an ESPN team abbreviation.
 
     Raises KeyError if the abbreviation isn't recognized.
     """
-    return STADIUMS[team_abbreviation]
+    return NFL_CATALOG.for_team(team_abbreviation)
 
 
 def stadium_for_venue(venue_id: str, venue_name: str) -> StadiumInfo | None:
     """Look up stadium info by ESPN venue id or name/alias, across *all* known
-    stadiums - not just a particular team's usual one. Used to resolve a game
-    played at a known NFL venue other than the home team's own (a relocated game),
-    and to resolve a home team's own venue even after ESPN renames it, as long as
-    the id matches or the new name has been added as an alias.
-
-    Returns None if neither the id nor the name/alias matches any known stadium.
+    stadiums - not just a particular team's usual one. Returns None if neither the id
+    nor the name/alias matches any known stadium. See `VenueCatalog.for_venue`.
     """
-    if venue_id:
-        for stadium in STADIUMS.values():
-            if stadium.venue_id == venue_id:
-                return stadium
-    if venue_name:
-        for stadium in STADIUMS.values():
-            if venue_name == stadium.name or venue_name in stadium.aliases:
-                return stadium
-    return None
+    return NFL_CATALOG.for_venue(venue_id, venue_name)

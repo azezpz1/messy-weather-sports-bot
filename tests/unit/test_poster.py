@@ -4,13 +4,6 @@ from messy_weather_sports_bot.poster.base import PartialThreadError, PostRef, So
 from messy_weather_sports_bot.poster.console import ConsolePoster
 
 
-@pytest.fixture(autouse=True)
-def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
-    # post_thread() retries a couple of times before giving up - keep the tests that
-    # exercise a failing post()/reply() fast rather than actually sleeping.
-    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
-
-
 def test_post_thread_empty_returns_no_refs() -> None:
     poster = ConsolePoster()
     assert poster.post_thread([]) == []
@@ -152,3 +145,7 @@ def test_post_thread_gives_up_after_a_couple_of_retries() -> None:
         AlwaysFlaky().post_thread(["root", "reply"])
 
     assert attempts["count"] > 1
+
+
+def test_from_env_defaults_to_a_plain_construction_that_ignores_the_prefix() -> None:
+    assert isinstance(ConsolePoster.from_env("CFB_"), ConsolePoster)

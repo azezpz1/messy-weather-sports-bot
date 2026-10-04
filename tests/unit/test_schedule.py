@@ -1,26 +1,26 @@
+import dataclasses
 import datetime as dt
 
 import httpx
 import pytest
 import respx
 
-from messy_weather_sports_bot.schedule import (
-    SCOREBOARD_URL,
-    Game,
-    get_todays_games,
-    outdoor_games,
-    skip_reason,
-    venue_drift,
-)
+from messy_weather_sports_bot.espn import EspnScoreboard
+from messy_weather_sports_bot.nfl import NFL
+from messy_weather_sports_bot.schedule import Game, outdoor_games, skip_reason, venue_drift
+from messy_weather_sports_bot.sport import Sport
 from messy_weather_sports_bot.stadiums import stadium_for_team
+from messy_weather_sports_bot.venues import VenueCatalog
+from tests.support.espn import espn_event
 
+SCOREBOARD_URL = NFL.scoreboard_url
 TARGET_DATE = dt.date(2026, 1, 18)
 
 
-@pytest.fixture(autouse=True)
-def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Keep the test suite fast - backoff timing is covered by tests/unit/test_retry.py.
-    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
+def get_todays_games(
+    date: dt.date, client: httpx.Client | None = None, sport: Sport = NFL
+) -> list[Game]:
+    return EspnScoreboard(sport, client).fetch(date)
 
 
 def _event(
@@ -32,24 +32,15 @@ def _event(
     venue_id: str = "",
     venue_country: str = "USA",
 ) -> dict:
-    venue: dict = {"fullName": venue_name, "indoor": venue_indoor}
-    if venue_id:
-        venue["id"] = venue_id
-    if venue_country:
-        venue["address"] = {"country": venue_country}
-    return {
-        "date": kickoff,
-        "competitions": [
-            {
-                "date": kickoff,
-                "venue": venue,
-                "competitors": [
-                    {"homeAway": "home", "team": {"abbreviation": home}},
-                    {"homeAway": "away", "team": {"abbreviation": away}},
-                ],
-            }
-        ],
-    }
+    return espn_event(
+        home,
+        away,
+        venue_name,
+        kickoff=kickoff,
+        venue_id=venue_id,
+        indoor=venue_indoor,
+        country=venue_country,
+    )
 
 
 @respx.mock
@@ -130,29 +121,17 @@ def test_renamed_venue_still_resolves_by_alias() -> None:
 
 
 @respx.mock
-def test_renamed_venue_resolves_by_stable_id_even_with_an_unknown_name(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from messy_weather_sports_bot.stadiums import STADIUMS
-
+def test_renamed_venue_resolves_by_stable_id_even_with_an_unknown_name() -> None:
     gb_stadium = stadium_for_team("GB")
-    monkeypatch.setitem(
-        STADIUMS,
-        "GB",
-        type(gb_stadium)(
-            gb_stadium.name,
-            gb_stadium.latitude,
-            gb_stadium.longitude,
-            gb_stadium.is_covered,
-            venue_id="3810",
-        ),
-    )
+    renamed = dataclasses.replace(gb_stadium, venue_id="3810")
+    catalog = VenueCatalog([renamed], by_team={"GB": renamed})
+    sport = dataclasses.replace(NFL, venue_catalog=lambda: catalog)
     payload = {
         "events": [_event("GB", "CHI", "2026-01-18T18:00Z", "Some Sponsor Field", venue_id="3810")]
     }
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=payload))
 
-    games = get_todays_games(TARGET_DATE)
+    games = get_todays_games(TARGET_DATE, sport=sport)
 
     assert games[0].stadium is not None
     assert games[0].stadium.latitude == gb_stadium.latitude
@@ -418,3 +397,22 @@ def test_skip_reason_names_an_international_venue() -> None:
 def test_skip_reason_names_an_unrecognized_team() -> None:
     game = _game("XYZ", "PHI", "Some Stadium", unresolved_reason="unrecognized home team 'XYZ'")
     assert skip_reason(game) == "unrecognized home team 'XYZ'"
+
+
+@respx.mock
+def test_a_kickoff_without_a_timezone_skips_only_that_event(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Rejected rather than assumed to be in the machine's timezone (which could put the
+    # game on the wrong day) - but one odd entry mustn't cost the rest of the slate.
+    odd = _event("BUF", "NE", "2026-01-18T18:00", "Highmark Stadium")
+    odd["shortName"] = "NE @ BUF"
+    payload = {"events": [odd, _event("GB", "CHI", "2026-01-18T18:00Z", "Lambeau Field")]}
+    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json=payload))
+
+    games = get_todays_games(TARGET_DATE)
+
+    assert [game.home_team for game in games] == ["GB"]
+    warning = next(r.getMessage() for r in caplog.records if r.levelname == "WARNING")
+    assert "'NE @ BUF'" in warning
+    assert "'2026-01-18T18:00'" in warning

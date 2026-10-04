@@ -17,24 +17,26 @@ import httpx
 import pytest
 import respx
 
-from messy_weather_sports_bot.main import EXIT_OK, EXIT_PARTIAL, main, run
-from messy_weather_sports_bot.schedule import SCOREBOARD_URL
+from messy_weather_sports_bot.nfl import NFL, main
+from messy_weather_sports_bot.pipeline import EXIT_OK, EXIT_PARTIAL, GameDayPipeline
 from messy_weather_sports_bot.stadiums import stadium_for_team
-from messy_weather_sports_bot.weather import nws_point
+from tests.support.espn import espn_event
+from tests.support.nws import forecast_response, mock_hourly_forecast
 
 LOGGER_NAME = "messy_weather_sports_bot"
 TARGET_DATE = dt.date(2026, 1, 18)
 INSTALLED_VERSION = importlib.metadata.version("messy-weather-sports-bot")
 
 
-@pytest.fixture(autouse=True)
-def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
+def run(platform_names: list[str], dry_run: bool) -> int:
+    return GameDayPipeline(NFL).run(platform_names, dry_run)
 
 
 @pytest.fixture(autouse=True)
 def _fixed_today(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("messy_weather_sports_bot.main.todays_local_date", lambda: TARGET_DATE)
+    monkeypatch.setattr(
+        "messy_weather_sports_bot.pipeline.todays_game_day", lambda sport: TARGET_DATE
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -43,58 +45,13 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.delenv("HEALTHCHECK_URL", raising=False)
 
 
-def _event(home: str, away: str, venue_name: str | None = None, country: str = "USA") -> dict:
-    kickoff = "2026-01-18T18:00Z"
-    return {
-        "date": kickoff,
-        "competitions": [
-            {
-                "date": kickoff,
-                "venue": {
-                    "fullName": venue_name or stadium_for_team(home).name,
-                    "indoor": False,
-                    "address": {"country": country},
-                },
-                "competitors": [
-                    {"homeAway": "home", "team": {"abbreviation": home}},
-                    {"homeAway": "away", "team": {"abbreviation": away}},
-                ],
-            }
-        ],
-    }
-
-
-def _forecast(
-    short_forecast: str, temperature: int, wind: str, precip: int, *, day: str = "2026-01-18"
-) -> httpx.Response:
-    period = {
-        "startTime": f"{day}T13:00:00-05:00",
-        "endTime": f"{day}T18:30:00-05:00",
-        "isDaytime": True,
-        "shortForecast": short_forecast,
-        "temperature": temperature,
-        "windSpeed": wind,
-        "probabilityOfPrecipitation": {"value": precip},
-    }
-    return httpx.Response(200, json={"properties": {"periods": [period]}})
-
-
 def _mock_stadium(home: str, forecast: httpx.Response, alerts: list[dict] | None = None) -> None:
     stadium = stadium_for_team(home)
-    lat, lon = stadium.latitude, stadium.longitude
-    point = nws_point(lat, lon)
-    hourly_url = f"https://api.weather.gov/gridpoints/MOCK-{lat}-{lon}/forecast/hourly"
-    respx.get(f"https://api.weather.gov/points/{point}").mock(
-        return_value=httpx.Response(200, json={"properties": {"forecastHourly": hourly_url}})
-    )
-    respx.get(hourly_url).mock(return_value=forecast)
-    respx.get(f"https://api.weather.gov/alerts/active?point={point}").mock(
-        return_value=httpx.Response(200, json={"features": alerts or []})
-    )
+    mock_hourly_forecast(stadium.latitude, stadium.longitude, response=forecast, alerts=alerts)
 
 
 def _mock_slate(events: list[dict]) -> None:
-    respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": events}))
+    respx.get(NFL.scoreboard_url).mock(return_value=httpx.Response(200, json={"events": events}))
 
 
 WINTER_STORM_WARNING = {
@@ -107,45 +64,47 @@ WINTER_STORM_WARNING = {
 
 
 def mock_happy_path() -> None:
-    _mock_slate([_event("GB", "CHI"), _event("BUF", "NE"), _event("PIT", "CLE")])
-    _mock_stadium("GB", _forecast("Rain", 40, "5 mph", 90), alerts=[WINTER_STORM_WARNING])
-    _mock_stadium("BUF", _forecast("Heavy Snow", 28, "18 mph", 90))
-    _mock_stadium("PIT", _forecast("Sunny", 55, "4 mph", 0))
+    _mock_slate([espn_event("GB", "CHI"), espn_event("BUF", "NE"), espn_event("PIT", "CLE")])
+    _mock_stadium("GB", forecast_response("Rain", 40, "5 mph", 90), alerts=[WINTER_STORM_WARNING])
+    _mock_stadium("BUF", forecast_response("Heavy Snow", 28, "18 mph", 90))
+    _mock_stadium("PIT", forecast_response("Sunny", 55, "4 mph", 0))
 
 
 def mock_every_skip_category() -> None:
     _mock_slate(
         [
-            _event("MIN", "DET"),  # covered stadium
-            _event("JAX", "PHI", "Tottenham Hotspur Stadium", country="England"),  # international
-            _event("CHI", "GB", "Brand New Soldier Field"),  # a US venue not on file: drift
-            _event("BUF", "NE"),  # outdoor, but the forecast doesn't cover the game
-            _event("PIT", "CLE"),  # messy
-            _event("DEN", "KC"),  # messy
+            espn_event("MIN", "DET"),  # covered stadium
+            espn_event(
+                "JAX", "PHI", "Tottenham Hotspur Stadium", country="England"
+            ),  # international
+            espn_event("CHI", "GB", "Brand New Soldier Field"),  # a US venue not on file: drift
+            espn_event("BUF", "NE"),  # outdoor, but the forecast doesn't cover the game
+            espn_event("PIT", "CLE"),  # messy
+            espn_event("DEN", "KC"),  # messy
         ]
     )
-    _mock_stadium("BUF", _forecast("Rain", 40, "5 mph", 90, day="2026-01-17"))
-    _mock_stadium("PIT", _forecast("Thunderstorms", 62, "12 mph", 70))
-    _mock_stadium("DEN", _forecast("Snow", 25, "14 mph", 70))
+    _mock_stadium("BUF", forecast_response("Rain", 40, "5 mph", 90, day="2026-01-17"))
+    _mock_stadium("PIT", forecast_response("Thunderstorms", 62, "12 mph", 70))
+    _mock_stadium("DEN", forecast_response("Snow", 25, "14 mph", 70))
 
 
 def mock_long_thread() -> None:
     _mock_slate(
         [
-            _event("GB", "MIN"),
-            _event("BUF", "NE"),
-            _event("PIT", "BAL"),
-            _event("CHI", "DET"),
-            _event("CLE", "CIN"),
-            _event("DEN", "LV"),
+            espn_event("GB", "MIN"),
+            espn_event("BUF", "NE"),
+            espn_event("PIT", "BAL"),
+            espn_event("CHI", "DET"),
+            espn_event("CLE", "CIN"),
+            espn_event("DEN", "LV"),
         ]
     )
-    _mock_stadium("GB", _forecast("Snow", 22, "16 mph", 80))
-    _mock_stadium("BUF", _forecast("Heavy Snow", 28, "18 mph", 90))
-    _mock_stadium("PIT", _forecast("Rain", 41, "9 mph", 80))
-    _mock_stadium("CHI", _forecast("Thunderstorms", 58, "14 mph", 60))
-    _mock_stadium("CLE", _forecast("Freezing Rain", 30, "8 mph", 60))
-    _mock_stadium("DEN", _forecast("Blowing Snow", 18, "24 mph", 50))
+    _mock_stadium("GB", forecast_response("Snow", 22, "16 mph", 80))
+    _mock_stadium("BUF", forecast_response("Heavy Snow", 28, "18 mph", 90))
+    _mock_stadium("PIT", forecast_response("Rain", 41, "9 mph", 80))
+    _mock_stadium("CHI", forecast_response("Thunderstorms", 58, "14 mph", 60))
+    _mock_stadium("CLE", forecast_response("Freezing Rain", 30, "8 mph", 60))
+    _mock_stadium("DEN", forecast_response("Blowing Snow", 18, "24 mph", 50))
 
 
 HAPPY_PATH_STDOUT = (

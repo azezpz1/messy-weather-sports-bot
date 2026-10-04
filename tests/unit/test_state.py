@@ -133,3 +133,23 @@ def test_record_leaves_no_tmp_file_behind(tmp_path: Path) -> None:
 
     assert not (tmp_path / "2026-09-27.json.tmp").exists()
     assert json.loads(path.read_text())  # is valid JSON
+
+
+def test_state_file_path_includes_the_sport_key_when_there_is_one(tmp_path: Path) -> None:
+    day = dt.date(2026, 9, 27)
+
+    assert state.state_file_path(day, tmp_path, sport_key="cfb") == tmp_path / "2026-09-27.cfb.json"
+    assert state.state_file_path(day, tmp_path, sport_key=None) == tmp_path / "2026-09-27.json"
+    assert state.state_file_path(day, tmp_path) == tmp_path / "2026-09-27.json"
+
+
+def test_two_sports_on_the_same_day_keep_separate_state(tmp_path: Path) -> None:
+    day = dt.date(2026, 9, 27)
+    first = state.DayState.load(state.state_file_path(day, tmp_path))
+    first.record("BlueskyPoster", [PostRef(id="first-root", root_id="first-root")], completed=True)
+
+    other = state.DayState.load(state.state_file_path(day, tmp_path, sport_key="other"))
+
+    assert other.for_platform("BlueskyPoster").completed is False
+    reloaded = state.DayState.load(state.state_file_path(day, tmp_path))
+    assert reloaded.for_platform("BlueskyPoster").completed is True

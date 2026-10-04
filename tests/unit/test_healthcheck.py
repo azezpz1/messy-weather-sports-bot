@@ -9,12 +9,6 @@ from messy_weather_sports_bot import healthcheck
 BASE_URL = "https://hc-ping.com/test-uuid"
 
 
-@pytest.fixture(autouse=True)
-def _no_real_sleeping(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Keep the test suite fast - backoff timing is covered by tests/unit/test_retry.py.
-    monkeypatch.setattr("tenacity.nap.time.sleep", lambda seconds: None)
-
-
 def test_new_run_id_returns_a_unique_string() -> None:
     assert healthcheck.new_run_id() != healthcheck.new_run_id()
 
@@ -135,3 +129,8 @@ def test_a_malformed_healthcheck_url_is_logged_but_never_raises(
     healthcheck.ping_start("https://[bad-ipv6]", "abc-123")  # must not raise
 
     assert "Healthcheck ping" in caplog.text
+
+
+def test_env_var_name_is_prefixed_per_sport() -> None:
+    assert healthcheck.env_var_name() == "HEALTHCHECK_URL"
+    assert healthcheck.env_var_name("CFB_") == "CFB_HEALTHCHECK_URL"

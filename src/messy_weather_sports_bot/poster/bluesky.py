@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
+from typing import Self
 
 from atproto import Client, models
 from atproto.exceptions import RateLimitExceededError, RequestErrorBase
@@ -21,13 +22,19 @@ MAX_RATE_LIMIT_WAIT_SECONDS = 30.0
 
 
 class BlueskyPoster(SocialMediaPoster):
-    def __init__(self, client: Client | None = None) -> None:
+    def __init__(self, client: Client | None = None, *, env_prefix: str = "") -> None:
+        """Logs in with `<env_prefix>BLUESKY_HANDLE` / `<env_prefix>BLUESKY_APP_PASSWORD`
+        unless `client` is given. A missing variable raises KeyError naming it."""
         self._client = client or Client()
         self._strong_refs: dict[str, models.ComAtprotoRepoStrongRef.Main] = {}
         if client is None:
-            handle = os.environ[HANDLE_ENV_VAR]
-            app_password = os.environ[APP_PASSWORD_ENV_VAR]
+            handle = os.environ[f"{env_prefix}{HANDLE_ENV_VAR}"]
+            app_password = os.environ[f"{env_prefix}{APP_PASSWORD_ENV_VAR}"]
             self._client.login(handle, app_password)
+
+    @classmethod
+    def from_env(cls, env_prefix: str = "") -> Self:
+        return cls(env_prefix=env_prefix)
 
     def _remember(self, uri: str, cid: str) -> None:
         self._strong_refs[uri] = models.ComAtprotoRepoStrongRef.Main(cid=cid, uri=uri)
