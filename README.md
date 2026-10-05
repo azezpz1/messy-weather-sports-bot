@@ -294,6 +294,63 @@ itself. Run it locally with:
 uv run python scripts/check_venue_drift.py
 ```
 
+### College football venue data
+
+`src/messy_weather_sports_bot/data/cfb_venues.json` lists the venues FBS teams
+play at: ESPN's venue id, coordinates, and whether the field is covered. It is
+keyed by venue id, never by team, because college teams play at neutral sites,
+bowls and rivalry venues too often for "the home team's stadium" to be a safe
+guess. A venue is also found by its id alone, never by name: there are many
+"Memorial Stadium"s, and a name-only match could report another town's weather.
+(The names and aliases in the file are for people reading it.) A game at an id
+that isn't in the table is therefore an unrecognized venue, not a guess.
+
+The file is generated, not edited by hand:
+
+```sh
+uv run python scripts/generate_cfb_venues.py --cache .cache/venue_geocode.json
+```
+
+It harvests the venues FBS teams played at over the last full season and this
+one so far from ESPN's scoreboards, then places each one: a venue that is also an
+NFL stadium copies the NFL table; otherwise it is geocoded with
+[Photon](https://photon.komoot.io) (OpenStreetMap data), accepting only a result
+in the venue's state whose name matches ESPN's (a partial match must also be in
+the right city) and whose OSM class is a stadium or sports ground. A venue
+ESPN reports as indoors is covered. A row is only written if the table's own
+reader would accept it, so a blank name or coordinates outside the venue's state
+(say, an override with a dropped minus sign) is refused and reported instead.
+
+A rerun only adds what's new: rows already in the table are kept as they are, and
+a row is never dropped unless you pass `--refresh` and the venue turns out to be
+outside the US, or an override excludes it - and either way it is listed under
+"Removed". `--refresh` recomputes every row; if it can't place a venue again, the
+old row stays and the venue is reported. Read the printed report before
+committing: each venue added or moved by a geocode comes with an OpenStreetMap link
+to check it against (rows copied from the NFL table or placed by an override have no
+link), and it lists what changed field by field, any venue that couldn't be
+placed, any override that matched no venue, and any FBS team with no home field
+in the table. A warning before it says if some scoreboard responses or games couldn't
+be read: a venue played only there is missing from the table.
+
+The script exits 0 when everything was placed, 2 when something needs a person
+(the table is still written), and 1 on an error - the network, an unreadable or
+malformed input file, an ESPN reply that isn't a scoreboard, or a harvest that
+found no games - in which case nothing is written. A `--overrides` path that
+doesn't exist is an error; the default file is optional.
+
+Corrections go in `scripts/data/cfb_venue_overrides.json` - coordinates, a roof
+that ESPN reports as open, aliases, an excluded venue, or a whole venue the
+scoreboards haven't shown yet - each with a `note` saying why, so a regeneration
+keeps them. The file is parsed strictly (a typo in a field name or type is an
+error, not a silently ignored override). Don't edit the table JSON by hand:
+`tests/unit/test_cfb_venue_table.py` fails if the file isn't exactly the form the
+generator writes, if an override isn't reflected in the table, or if a row's
+coordinates leave its state, but it can't tell a hand-moved coordinate that stays
+well-formed from a generated one, so make corrections as overrides. Pinned there
+too: the set of covered venues and a list of famous open-air stadiums. Rerun the
+generator at the start of each season for new stadiums and renames.
+
 ### Pre-commit hooks
 
 Optionally, install [pre-commit](https://pre-commit.com/) to run ruff (lint

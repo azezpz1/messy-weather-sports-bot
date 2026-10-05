@@ -31,10 +31,44 @@ def test_a_stadium_without_a_venue_id_matches_by_name() -> None:
     assert VenueCatalog([NO_ID]).for_venue("", "Unnumbered Field") is NO_ID
 
 
-def test_the_first_stadium_wins_when_two_share_an_id_or_a_name() -> None:
+def test_the_first_stadium_wins_when_two_share_an_id() -> None:
+    first = StadiumInfo("First Name", 40.0, -80.0, is_covered=False, venue_id="1")
+    second = StadiumInfo("Second Name", 41.0, -81.0, is_covered=False, venue_id="1")
+
+    assert VenueCatalog([first, second]).for_venue("1", "") is first
+
+
+def test_the_same_building_listed_twice_still_resolves_by_name() -> None:
     catalog = VenueCatalog([OLD_PARK, OLD_PARK_TWIN])
-    assert catalog.for_venue("1", "") is OLD_PARK
+
     assert catalog.for_venue("", "Old Park") is OLD_PARK
+
+
+def test_an_id_only_catalog_ignores_names_and_aliases() -> None:
+    catalog = VenueCatalog([OLD_PARK, NEW_DOME], match_names=False)
+
+    assert catalog.for_venue("1", "") is OLD_PARK
+    assert catalog.for_venue("", "Old Park") is None
+    assert catalog.for_venue("", "The Old") is None
+    assert catalog.for_venue("999", "New Dome") is None  # an unknown id isn't rescued by a name
+
+
+def test_an_id_only_catalog_keeps_the_first_stadium_for_a_shared_id() -> None:
+    first = StadiumInfo("First Name", 40.0, -80.0, is_covered=False, venue_id="1")
+    second = StadiumInfo("Second Name", 41.0, -81.0, is_covered=False, venue_id="1")
+
+    assert VenueCatalog([first, second], match_names=False).for_venue("1", "") is first
+
+
+def test_a_town_sharing_a_name_with_a_known_stadium_is_reported_as_drift_not_guessed() -> None:
+    # "Old Park" is also the name of a stadium elsewhere; an id-only catalog doesn't know id 77.
+    catalog = VenueCatalog([OLD_PARK], match_names=False)
+
+    result = resolve_venue(catalog, "XYZ", {"fullName": "Old Park", "id": "77"}, venue_present=True)
+
+    assert result[0] is None
+    assert result[2] is True
+    assert "Old Park" in str(result[1])
 
 
 def test_returns_none_for_an_unknown_venue() -> None:

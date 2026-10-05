@@ -44,6 +44,11 @@ class VenueCatalog:
     the one that comes first in `stadiums` wins. `by_team` optionally maps a team
     abbreviation to its usual stadium, for the fallback when ESPN omits a game's venue
     entirely; it is built into the catalog, so changing the mapping later has no effect.
+
+    `match_names=False` makes the catalog id-only, for a table too big to trust a name in:
+    many towns have a "Memorial Stadium", so a name-only match could report another
+    town's weather. An unknown id is then an unrecognized venue, which is reported
+    as drift instead.
     """
 
     def __init__(
@@ -51,15 +56,17 @@ class VenueCatalog:
         stadiums: Iterable[StadiumInfo],
         *,
         by_team: Mapping[str, StadiumInfo] | None = None,
+        match_names: bool = True,
     ) -> None:
         self._by_id: dict[str, StadiumInfo] = {}
         self._by_name: dict[str, StadiumInfo] = {}
         for stadium in stadiums:
             if stadium.venue_id:
                 self._by_id.setdefault(stadium.venue_id, stadium)
-            self._by_name.setdefault(stadium.name, stadium)
-            for alias in stadium.aliases:
-                self._by_name.setdefault(alias, stadium)
+            if match_names:
+                self._by_name.setdefault(stadium.name, stadium)
+                for alias in stadium.aliases:
+                    self._by_name.setdefault(alias, stadium)
         self._by_team = dict(by_team or {})
 
     def for_team(self, team_abbreviation: str) -> StadiumInfo:
@@ -76,7 +83,7 @@ class VenueCatalog:
         return None
 
 
-def _is_confirmed_international(venue_address: dict) -> bool:
+def is_confirmed_international(venue_address: dict) -> bool:
     """True only when ESPN reports a non-US country. A *missing* country is
     deliberately not treated as international - it's ambiguous, and treating it as
     international would silently exclude an unrecognized US venue from
@@ -115,7 +122,7 @@ def resolve_venue(
                 stadium = catalog.for_team(home_team)
             except KeyError:
                 return None, f"unrecognized home team {home_team!r}", False
-        elif _is_confirmed_international(venue.get("address") or {}):
+        elif is_confirmed_international(venue.get("address") or {}):
             return None, f'international venue "{venue_name}"', False
         else:
             # A US (or unconfirmed-country) venue we don't have on file - likely a
