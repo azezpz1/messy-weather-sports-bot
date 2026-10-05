@@ -1,0 +1,512 @@
+{
+  "source": "Trimmed from ESPN's college-football scoreboard (groups=80&limit=400) for 2025-10-04, 2025-10-11 and 2025-08-23; every value is as ESPN sent it. curatedRank.current is 99 for an unranked team.",
+  "scoreboards": {
+    "20251004": {
+      "events": [
+        {
+          "id": "401752859",
+          "date": "2025-10-04T23:30Z",
+          "name": "Minnesota Golden Gophers at Ohio State Buckeyes",
+          "shortName": "MINN @ OSU",
+          "competitions": [
+            {
+              "id": "401752859",
+              "date": "2025-10-04T23:30Z",
+              "neutralSite": false,
+              "timeValid": true,
+              "venue": {
+                "id": "3861",
+                "fullName": "Ohio Stadium",
+                "address": {
+                  "city": "Columbus",
+                  "state": "OH",
+                  "country": "USA"
+                },
+                "indoor": false
+              },
+              "competitors": [
+                {
+                  "id": "194",
+                  "homeAway": "home",
+                  "curatedRank": {
+                    "current": 1
+                  },
+                  "team": {
+                    "id": "194",
+                    "location": "Ohio State",
+                    "name": "Buckeyes",
+                    "abbreviation": "OSU",
+                    "displayName": "Ohio State Buckeyes",
+                    "shortDisplayName": "Ohio State",
+                    "venue": {
+                      "id": "3861"
+                    }
+                  }
+                },
+                {
+                  "id": "135",
+                  "homeAway": "away",
+                  "curatedRank": {
+                    "current": 99
+                  },
+                  "team": {
+                    "id": "135",
+                    "location": "Minnesota",
+                    "name": "Golden Gophers",
+                    "abbreviation": "MINN",
+                    "displayName": "Minnesota Golden Gophers",
+                    "shortDisplayName": "Minnesota",
+                    "venue": {
+                      "id": "3953"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "401752855",
+          "date": "2025-10-04T19:30Z",
+          "name": "Penn State Nittany Lions at UCLA Bruins",
+          "shortName": "PSU @ UCLA",
+          "competitions": [
+            {
+              "id": "401752855",
+              "date": "2025-10-04T19:30Z",
+              "neutralSite": false,
+              "timeValid": true,
+              "venue": {
+                "id": "1056",
+                "fullName": "Rose Bowl",
+                "address": {
+                  "city": "Pasadena",
+                  "state": "CA",
+                  "country": "USA"
+                },
+                "indoor": false
+              },
+              "competitors": [
+                {
+                  "id": "26",
+                  "homeAway": "home",
+                  "curatedRank": {
+                    "current": 99
+                  },
+                  "team": {
+                    "id": "26",
+                    "location": "UCLA",
+                    "name": "Bruins",
+                    "abbreviation": "UCLA",
+                    "displayName": "UCLA Bruins",
+                    "shortDisplayName": "UCLA",
+                    "venue": {
+                      "id": "1056"
+                    }
+                  }
+                },
+                {
+                  "id": "213",
+                  "homeAway": "away",
+                  "curatedRank": {
+                    "current": 7
+                  },
+                  "team": {
+                    "id": "213",
+                    "location": "Penn State",
+                    "name": "Nittany Lions",
+                    "abbreviation": "PSU",
+                    "displayName": "Penn State Nittany Lions",
+                    "shortDisplayName": "Penn State",
+                    "venue": {
+                      "id": "3632"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "401752726",
+          "date": "2025-10-04T19:30Z",
+          "name": "Vanderbilt Commodores at Alabama Crimson Tide",
+          "shortName": "VAN @ ALA",
+          "competitions": [
+            {
+              "id": "401752726",
+              "date": "2025-10-04T19:30Z",
+              "neutralSite": false,
+              "timeValid": true,
+              "venue": {
+                "id": "3657",
+                "fullName": "Bryant-Denny Stadium",
+                "address": {
+                  "city": "Tuscaloosa",
+                  "state": "AL",
+                  "country": "USA"
+                },
+                "indoor": false
+              },
+              "competitors": [
+                {
+                  "id": "333",
+                  "homeAway": "home",
+                  "curatedRank": {
+                    "current": 10
+                  },
+                  "team": {
+                    "id": "333",
+                    "location": "Alabama",
+                    "name": "Crimson Tide",
+                    "abbreviation": "ALA",
+                    "displayName": "Alabama Crimson Tide",
+                    "shortDisplayName": "Alabama",
+                    "venue": {
+                      "id": "3657"
+                    }
+                  }
+                },
+                {
+                  "id": "238",
+                  "homeAway": "away",
+                  "curatedRank": {
+                    "current": 16
+                  },
+                  "team": {
+                    "id": "238",
+                    "location": "Vanderbilt",
+                    "name": "Commodores",
+                    "abbreviation": "VAN",
+                    "displayName": "Vanderbilt Commodores",
+                    "shortDisplayName": "Vanderbilt",
+                    "venue": {
+                      "id": "3973"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "401754550",
+          "date": "2025-10-04T16:00Z",
+          "name": "Boston College Eagles at Pittsburgh Panthers",
+          "shortName": "BC @ PITT",
+          "competitions": [
+            {
+              "id": "401754550",
+              "date": "2025-10-04T16:00Z",
+              "neutralSite": false,
+              "timeValid": true,
+              "venue": {
+                "id": "3752",
+                "fullName": "Acrisure Stadium",
+                "address": {
+                  "city": "Pittsburgh",
+                  "state": "PA",
+                  "country": "USA"
+                },
+                "indoor": false
+              },
+              "competitors": [
+                {
+                  "id": "221",
+                  "homeAway": "home",
+                  "curatedRank": {
+                    "current": 99
+                  },
+                  "team": {
+                    "id": "221",
+                    "location": "Pittsburgh",
+                    "name": "Panthers",
+                    "abbreviation": "PITT",
+                    "displayName": "Pittsburgh Panthers",
+                    "shortDisplayName": "Pitt",
+                    "venue": {
+                      "id": "3752"
+                    }
+                  }
+                },
+                {
+                  "id": "103",
+                  "homeAway": "away",
+                  "curatedRank": {
+                    "current": 99
+                  },
+                  "team": {
+                    "id": "103",
+                    "location": "Boston College",
+                    "name": "Eagles",
+                    "abbreviation": "BC",
+                    "displayName": "Boston College Eagles",
+                    "shortDisplayName": "Boston College",
+                    "venue": {
+                      "id": "3615"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "401754557",
+          "date": "2025-10-04T18:00Z",
+          "name": "Campbell Fighting Camels at NC State Wolfpack",
+          "shortName": "CAM @ NCSU",
+          "competitions": [
+            {
+              "id": "401754557",
+              "date": "2025-10-04T18:00Z",
+              "neutralSite": false,
+              "timeValid": true,
+              "venue": {
+                "id": "3670",
+                "fullName": "Carter-Finley Stadium",
+                "address": {
+                  "city": "Raleigh",
+                  "state": "NC",
+                  "country": "USA"
+                },
+                "indoor": false
+              },
+              "competitors": [
+                {
+                  "id": "152",
+                  "homeAway": "home",
+                  "curatedRank": {
+                    "current": 99
+                  },
+                  "team": {
+                    "id": "152",
+                    "location": "NC State",
+                    "name": "Wolfpack",
+                    "abbreviation": "NCSU",
+                    "displayName": "NC State Wolfpack",
+                    "shortDisplayName": "NC State",
+                    "venue": {
+                      "id": "3670"
+                    }
+                  }
+                },
+                {
+                  "id": "2097",
+                  "homeAway": "away",
+                  "curatedRank": {
+                    "current": 99
+                  },
+                  "team": {
+                    "id": "2097",
+                    "location": "Campbell",
+                    "name": "Fighting Camels",
+                    "abbreviation": "CAM",
+                    "displayName": "Campbell Fighting Camels",
+                    "shortDisplayName": "Campbell",
+                    "venue": {
+                      "id": "3629"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "401754551",
+          "date": "2025-10-05T02:30Z",
+          "name": "Duke Blue Devils at California Golden Bears",
+          "shortName": "DUKE @ CAL",
+          "competitions": [
+            {
+              "id": "401754551",
+              "date": "2025-10-05T02:30Z",
+              "neutralSite": false,
+              "timeValid": true,
+              "venue": {
+                "id": "3831",
+                "fullName": "California Memorial Stadium",
+                "address": {
+                  "city": "Berkeley",
+                  "state": "CA",
+                  "country": "USA"
+                },
+                "indoor": false
+              },
+              "competitors": [
+                {
+                  "id": "25",
+                  "homeAway": "home",
+                  "curatedRank": {
+                    "current": 99
+                  },
+                  "team": {
+                    "id": "25",
+                    "location": "California",
+                    "name": "Golden Bears",
+                    "abbreviation": "CAL",
+                    "displayName": "California Golden Bears",
+                    "shortDisplayName": "California",
+                    "venue": {
+                      "id": "3831"
+                    }
+                  }
+                },
+                {
+                  "id": "150",
+                  "homeAway": "away",
+                  "curatedRank": {
+                    "current": 99
+                  },
+                  "team": {
+                    "id": "150",
+                    "location": "Duke",
+                    "name": "Blue Devils",
+                    "abbreviation": "DUKE",
+                    "displayName": "Duke Blue Devils",
+                    "shortDisplayName": "Duke",
+                    "venue": {
+                      "id": "3982"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "20251011": {
+      "events": [
+        {
+          "id": "401752736",
+          "date": "2025-10-11T19:30Z",
+          "name": "Oklahoma Sooners at Texas Longhorns",
+          "shortName": "OU VS TEX",
+          "competitions": [
+            {
+              "id": "401752736",
+              "date": "2025-10-11T19:30Z",
+              "neutralSite": true,
+              "timeValid": true,
+              "venue": {
+                "id": "499",
+                "fullName": "Cotton Bowl",
+                "address": {
+                  "city": "Dallas",
+                  "state": "TX",
+                  "country": "USA"
+                },
+                "indoor": false
+              },
+              "competitors": [
+                {
+                  "id": "251",
+                  "homeAway": "home",
+                  "curatedRank": {
+                    "current": 99
+                  },
+                  "team": {
+                    "id": "251",
+                    "location": "Texas",
+                    "name": "Longhorns",
+                    "abbreviation": "TEX",
+                    "displayName": "Texas Longhorns",
+                    "shortDisplayName": "Texas",
+                    "venue": {
+                      "id": "3910"
+                    }
+                  }
+                },
+                {
+                  "id": "201",
+                  "homeAway": "away",
+                  "curatedRank": {
+                    "current": 6
+                  },
+                  "team": {
+                    "id": "201",
+                    "location": "Oklahoma",
+                    "name": "Sooners",
+                    "abbreviation": "OU",
+                    "displayName": "Oklahoma Sooners",
+                    "shortDisplayName": "Oklahoma",
+                    "venue": {
+                      "id": "3835"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "20250823": {
+      "events": [
+        {
+          "id": "401756846",
+          "date": "2025-08-23T16:00Z",
+          "name": "Iowa State Cyclones at Kansas State Wildcats",
+          "shortName": "ISU VS KSU",
+          "competitions": [
+            {
+              "id": "401756846",
+              "date": "2025-08-23T16:00Z",
+              "neutralSite": true,
+              "timeValid": true,
+              "venue": {
+                "id": "3504",
+                "fullName": "Aviva Stadium",
+                "address": {
+                  "city": "Dublin",
+                  "country": "Ireland"
+                },
+                "indoor": false
+              },
+              "competitors": [
+                {
+                  "id": "2306",
+                  "homeAway": "home",
+                  "curatedRank": {
+                    "current": 17
+                  },
+                  "team": {
+                    "id": "2306",
+                    "location": "Kansas State",
+                    "name": "Wildcats",
+                    "abbreviation": "KSU",
+                    "displayName": "Kansas State Wildcats",
+                    "shortDisplayName": "Kansas St",
+                    "venue": {
+                      "id": "3636"
+                    }
+                  }
+                },
+                {
+                  "id": "66",
+                  "homeAway": "away",
+                  "curatedRank": {
+                    "current": 22
+                  },
+                  "team": {
+                    "id": "66",
+                    "location": "Iowa State",
+                    "name": "Cyclones",
+                    "abbreviation": "ISU",
+                    "displayName": "Iowa State Cyclones",
+                    "shortDisplayName": "Iowa State",
+                    "venue": {
+                      "id": "3772"
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

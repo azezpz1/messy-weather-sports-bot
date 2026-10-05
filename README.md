@@ -2,7 +2,8 @@
 
 A recommendation engine for NFL games worth watching because the weather is
 going to make them messy — snow games, sideways rain, wind that turns every
-field goal into an adventure — posted to social media.
+field goal into an adventure — posted to social media. A second bot does the
+same for college football's [Top 25](#college-football-top-25).
 
 **This is not a sports weather report.** Every post should tell followers
 *"you should watch this game, because it's going to be messy."* A game with
@@ -172,6 +173,59 @@ been the messy one - and if every outdoor game's forecast failed, it exits `1`
 run's outcome — the bot doesn't need `HEALTHCHECK_URL` set at all, and
 nothing is pinged if it's unset.
 
+## College football (Top 25)
+
+`messy-weather-cfb-bot` is the same bot for college football: the same
+forecast check, the same messiness thresholds, the same threaded posts - and
+the same rule that a game with nice weather never appears. It covers only games
+where **one or both teams are in the Top 25** (ESPN's ranking: the AP poll
+during the season, the CFP rankings later), since a full Saturday is 60-80
+games and the ranked ones are the ones followers tune in for. Posts read
+"Messy Top 25 college football games to watch", ranked teams carry their
+number, and a neutral-site game says "vs" rather than "@":
+
+```text
+🌩️ Messy Top 25 college football games to watch — Sat Oct 10
+🏈 South Carolina @ #16 Florida (12:45pm ET): ⛈️ Showers And Thunderstorms Likely, 82°F (feels 90°F), 13mph wind
+🏈 #2 Georgia @ #6 Alabama (7:30pm ET): 🌧️ Rain Showers Likely, 74°F, 20mph wind
+```
+
+```sh
+uv run messy-weather-cfb-bot --dry-run                  # preview today
+uv run messy-weather-cfb-bot --dry-run --date 2026-10-10  # preview another Saturday
+uv run messy-weather-cfb-bot                            # post for real
+```
+
+It takes the same options as the NFL bot, and posts to **its own accounts**:
+nothing is shared with the NFL bot, and nothing falls back to its settings (a
+fallback could post college games to the NFL account).
+
+| Env var                    | Description                                          |
+| -------------------------- | ---------------------------------------------------- |
+| `CFB_BLUESKY_HANDLE`       | The college football account's Bluesky handle        |
+| `CFB_BLUESKY_APP_PASSWORD` | An app password for that account                     |
+| `CFB_HEALTHCHECK_URL`      | Optional ping URL for its own Healthchecks.io check  |
+
+Its post state is kept beside the NFL's as `<date>.cfb.json` (the NFL's stays
+`<date>.json`), so the two never mistake each other's thread for their own. Give
+it its own Healthchecks check, with the schedule and timezone of its own crontab
+entry.
+
+Notes:
+
+- **Venues** come from the generated college table (see
+  [College football venue data](#college-football-venue-data)), looked up by ESPN's
+  venue id. A game at a venue that isn't in it is skipped and logged as
+  unrecognized, and the weekly [venue drift check](#stadium-data) flags it.
+- **Rankings guard:** ESPN gives every team a ranking field (99 when unranked). If a
+  day has eight or more games and none carries one, ESPN's response has changed;
+  the bot logs a warning and exits `2` instead of quietly never posting.
+- **Late kickoffs:** ESPN files every game under its Eastern date, so a 10:30pm
+  ET kickoff belongs to that day's run, and a game whose kickoff time isn't set
+  yet is skipped.
+- An unranked game costs no weather lookups, and a day with no messy ranked game
+  posts nothing and exits cleanly, like the NFL's.
+
 ## Running on a schedule (e.g. a Raspberry Pi)
 
 This script doesn't schedule itself — run it via cron (or any scheduler) on
@@ -185,8 +239,18 @@ Thursdays, Sundays, and Mondays:
 0  9   *   *   0,1,4        cd /path/to/messy-weather-sports-bot && uv run messy-weather-nfl-bot
 ```
 
+The college football bot needs its own entry. Bowl games and the playoff land on
+arbitrary weekdays, and it is a no-op on any day without a messy ranked game, so
+run it daily through the season (August to January):
+
+```cron
+# m h  dom mon dow          command
+0  9   8-12,1 * *            cd /path/to/messy-weather-sports-bot && uv run messy-weather-cfb-bot
+```
+
 Cron does not load your shell profile or `.env` files automatically, so
-`BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD`, and `HEALTHCHECK_URL` won't be set
+`BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD`, and `HEALTHCHECK_URL` (and the `CFB_`
+versions the college bot reads) won't be set
 unless you provide them explicitly: set them directly in the crontab, or in
 a wrapper script that exports them before invoking `uv`. If you're using
 Healthchecks.io, match the check's schedule and timezone to whatever cron
@@ -283,15 +347,20 @@ doesn't match anything is skipped and logged as unrecognized rather than
 silently dropped.
 
 The "Venue drift check" workflow (`.github/workflows/venue-drift-check.yml`)
-runs weekly during the season and fails if any upcoming US game's venue
-isn't recognized, so a stadium rename or relocation is caught before it
-quietly drops a team's home games. It also runs on pull requests that touch
-`stadiums.py`, the code the check runs through (`venues.py`, `espn.py`,
-`schedule.py`, `sport.py`, `nfl.py`), the check script, or the workflow file
-itself. Run it locally with:
+runs weekly during each season - one job for the NFL, one for college football -
+and fails if any upcoming US game's venue isn't recognized, so a stadium rename
+or relocation is caught before it quietly drops a team's home games. (The
+college job checks every game, not only the ranked ones, since any venue can
+host a ranked team next week; for a venue it doesn't know, rerun the
+[generator](#college-football-venue-data).) It also runs on pull requests that
+touch a venue table (`stadiums.py`, `data/cfb_venues.json`), the code the check
+runs through (`venues.py`, `venue_table.py`, `espn.py`, `schedule.py`,
+`sport.py`, `sports.py`, `nfl.py`, `cfb.py`, `drift.py`), the check script, or
+the workflow file itself. Run it locally with:
 
 ```sh
-uv run python scripts/check_venue_drift.py
+uv run python scripts/check_venue_drift.py            # the NFL
+uv run python scripts/check_venue_drift.py --sport cfb  # college football
 ```
 
 ### College football venue data
@@ -303,7 +372,8 @@ bowls and rivalry venues too often for "the home team's stadium" to be a safe
 guess. A venue is also found by its id alone, never by name: there are many
 "Memorial Stadium"s, and a name-only match could report another town's weather.
 (The names and aliases in the file are for people reading it.) A game at an id
-that isn't in the table is therefore an unrecognized venue, not a guess.
+that isn't in the table is therefore an unrecognized venue, not a guess. The
+[college football bot](#college-football-top-25) reads it.
 
 The file is generated, not edited by hand:
 
