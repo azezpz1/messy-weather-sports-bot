@@ -848,10 +848,10 @@ def test_the_report_lists_added_rows_with_a_map_link_and_what_needs_a_human() ->
     assert "Skipped as international: 7 Aviva Stadium (Ireland)" in text
 
 
-def test_a_venue_observation_exposes_its_address_for_the_international_check() -> None:
+def test_a_venue_observation_exposes_its_place_for_the_international_check() -> None:
     observation = harvest_of(cfb_event("1")).venues["1"]
 
-    assert observation.address == {"city": "Athens", "state": "GA", "country": "USA"}
+    assert observation.place == {"city": "Athens", "state": "GA", "country": "USA"}
 
 
 # ------------------------------------------------- name matching (real ESPN/OSM pairs)

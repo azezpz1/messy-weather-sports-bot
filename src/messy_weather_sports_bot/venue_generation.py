@@ -226,7 +226,8 @@ class VenueObservation:
         return _most_common(self.countries)
 
     @property
-    def address(self) -> dict:
+    def place(self) -> dict:
+        """city, state and country in the shape `is_confirmed_international` reads."""
         return {"city": self.city, "state": self.state, "country": self.country}
 
     def describe(self) -> str:
@@ -297,12 +298,12 @@ def observe_scoreboard(payload: object, harvest: Harvest) -> None:
             harvest.events_without_venue_id += 1
         else:
             observation = harvest.venues.setdefault(venue_id, VenueObservation(venue_id))
-            address = _mapping(venue.get("address"))
+            place = _mapping(venue.get("address"))
             for counter, value in (
                 (observation.names, venue.get("fullName")),
-                (observation.cities, address.get("city")),
-                (observation.states, address.get("state")),
-                (observation.countries, address.get("country")),
+                (observation.cities, place.get("city")),
+                (observation.states, place.get("state")),
+                (observation.countries, place.get("country")),
             ):
                 text = str(value or "").strip()
                 if text:
@@ -1036,7 +1037,7 @@ def build_table(
             report.excluded.append(f"{venue_id} {observation.name}: {override.note}")
         elif venue_id in previous and not refresh:
             settle(previous[venue_id], (), description)
-        elif is_confirmed_international(observation.address):
+        elif is_confirmed_international(observation.place):
             report.international.append(f"{venue_id} {observation.name} ({observation.country})")
         else:
             row, notes, reasons = _resolve(observation, override, nfl_catalog, geocoder)
