@@ -14,7 +14,6 @@ from messy_weather_sports_bot.nfl import NFL
 from messy_weather_sports_bot.schedule import Game
 from messy_weather_sports_bot.sports import SPORTS
 from messy_weather_sports_bot.venue_table import load_packaged_table
-from messy_weather_sports_bot.weather import GAME_DURATION
 
 
 def game(home_rank: int | None = None, away_rank: int | None = None) -> Game:
@@ -61,9 +60,10 @@ def test_the_college_bot_reads_rankings_neutral_sites_and_friendly_team_names() 
 
 
 def test_the_college_game_length_is_its_own_constant() -> None:
-    # Equal to the NFL's today, but a separate constant so each can be tuned on its own.
+    # A separate constant from the NFL's, so each can be tuned on its own: nothing here
+    # ties the two together, only that the college value is a plausible game length.
     assert CFB.game_duration == CFB_GAME_DURATION
-    assert CFB_GAME_DURATION == GAME_DURATION == dt.timedelta(hours=3, minutes=30)
+    assert dt.timedelta(hours=3) <= CFB_GAME_DURATION <= dt.timedelta(hours=4)
 
 
 def test_game_days_are_eastern_like_the_nfls() -> None:

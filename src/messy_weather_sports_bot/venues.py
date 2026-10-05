@@ -69,6 +69,12 @@ class VenueCatalog:
                     self._by_name.setdefault(alias, stadium)
         self._by_team = dict(by_team or {})
 
+    @property
+    def has_team_stadiums(self) -> bool:
+        """Whether teams have a usual stadium to fall back on (the NFL's do; a college
+        catalog has none, since teams play at neutral sites too often to guess)."""
+        return bool(self._by_team)
+
     def for_team(self, team_abbreviation: str) -> StadiumInfo:
         """The team's usual stadium. Raises KeyError if it isn't recognized."""
         return self._by_team[team_abbreviation]
@@ -121,6 +127,8 @@ def resolve_venue(
             try:
                 stadium = catalog.for_team(home_team)
             except KeyError:
+                if not catalog.has_team_stadiums:
+                    return None, f"no venue reported for {home_team!r}", False
                 return None, f"unrecognized home team {home_team!r}", False
         elif is_confirmed_international(venue.get("address") or {}):
             return None, f'international venue "{venue_name}"', False

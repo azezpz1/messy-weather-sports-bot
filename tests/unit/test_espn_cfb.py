@@ -10,9 +10,10 @@ import pytest
 import respx
 
 from messy_weather_sports_bot.cfb import CFB
-from messy_weather_sports_bot.espn import EspnScoreboard
+from messy_weather_sports_bot.espn import EspnScoreboard, VenueTableError
 from messy_weather_sports_bot.nfl import NFL
 from messy_weather_sports_bot.schedule import Game
+from messy_weather_sports_bot.venues import VenueCatalog
 from tests.support.espn import MISSING, cfb_event, cfb_sample, espn_event
 
 DAY = dt.date(2026, 1, 18)
@@ -156,46 +157,68 @@ def test_the_college_flags_are_off_for_the_nfl() -> None:
 
 
 RANK_CASES = [
-    pytest.param(1, 1, True, id="first"),
-    pytest.param(4, 4, True, id="four"),
-    pytest.param(25, 25, True, id="last-place-in-the-poll"),
-    pytest.param(26, None, True, id="just-outside"),
-    pytest.param(0, None, True, id="zero"),
-    pytest.param(-3, None, True, id="negative"),
-    pytest.param(99, None, True, id="unranked"),
-    pytest.param("4", None, False, id="a-string"),
-    pytest.param(4.0, None, False, id="a-float"),
-    pytest.param(True, None, False, id="a-bool-is-not-a-rank"),
-    pytest.param(None, None, False, id="null"),
+    # (what ESPN sent as curatedRank.current, the ranking, readable?, unreadable?)
+    pytest.param(1, 1, True, False, id="first"),
+    pytest.param(4, 4, True, False, id="four"),
+    pytest.param(25, 25, True, False, id="last-place-in-the-poll"),
+    pytest.param(26, None, True, False, id="just-outside"),
+    pytest.param(0, None, True, False, id="zero"),
+    pytest.param(-3, None, True, False, id="negative"),
+    pytest.param(99, None, True, False, id="unranked"),
+    pytest.param("4", None, False, True, id="a-string"),
+    pytest.param(4.0, None, False, True, id="a-float"),
+    pytest.param(True, None, False, True, id="a-bool-is-not-a-rank"),
+    pytest.param(None, None, False, True, id="null"),
 ]
 
 
 @respx.mock
-@pytest.mark.parametrize(("current", "rank", "reported"), RANK_CASES)
+@pytest.mark.parametrize(("current", "rank", "reported", "unreadable"), RANK_CASES)
 def test_only_an_integer_from_1_to_25_is_a_ranking(
-    current: object, rank: int | None, reported: bool
+    current: object, rank: int | None, reported: bool, unreadable: bool
 ) -> None:
-    # The visitor carries no ranking, so `rankings_reported` is about the home team alone.
+    # The visitor carries no ranking, so what's reported is about the home team alone.
     (game,) = fetch([cfb_event("Ohio State", "Minnesota", home_rank=current, away_curated=MISSING)])
 
-    assert (game.home_rank, game.rankings_reported) == (rank, reported)
+    assert (game.home_rank, game.rankings_reported, game.rankings_unreadable) == (
+        rank,
+        reported,
+        unreadable,
+    )
     assert game.away_rank is None
 
 
 @respx.mock
 @pytest.mark.parametrize(
-    "curated",
-    [MISSING, {}, "oops", [], {"current": None}],
-    ids=["missing", "empty", "string", "list", "null-current"],
+    ("curated", "unreadable"),
+    [
+        pytest.param(MISSING, False, id="missing"),
+        pytest.param({}, True, id="empty"),
+        pytest.param("oops", True, id="string"),
+        pytest.param([], True, id="list"),
+        pytest.param({"current": None}, True, id="null-current"),
+    ],
 )
 def test_a_ranking_field_that_is_missing_or_malformed_is_unranked_and_unreported(
-    curated: object,
+    curated: object, unreadable: bool
 ) -> None:
+    # Absent is "no rankings sent"; present but not a whole number is "a format we can't
+    # read" - the two mean different things when ESPN changes.
     event = cfb_event("Ohio State", "Minnesota", home_curated=curated, away_curated=curated)
 
     (game,) = fetch([event])
 
     assert (game.home_rank, game.away_rank, game.rankings_reported) == (None, None, False)
+    assert game.rankings_unreadable is unreadable
+
+
+@respx.mock
+def test_an_unreadable_ranking_on_one_team_is_flagged_even_if_the_other_is_fine() -> None:
+    event = cfb_event("Ohio State", "Minnesota", home_rank="1", away_rank=99)
+
+    (game,) = fetch([event])
+
+    assert (game.rankings_reported, game.rankings_unreadable) == (True, True)
 
 
 @respx.mock
@@ -245,6 +268,16 @@ def test_a_blank_name_field_is_skipped_for_the_next_one() -> None:
     (game,) = fetch([event])
 
     assert game.home_team == "Ohio State Mascots"
+
+
+@respx.mock
+def test_the_whitespace_around_a_name_is_not_part_of_the_label() -> None:
+    event = cfb_event("Ohio State", "Minnesota")
+    event["competitions"][0]["competitors"][0]["team"]["shortDisplayName"] = " Ohio State "
+
+    (game,) = fetch([event])
+
+    assert game.home_team == "Ohio State"
 
 
 @respx.mock
@@ -337,3 +370,49 @@ def test_an_event_without_a_venue_falls_back_to_no_stadium_not_a_wrong_one() -> 
     # games too often to guess), so the game just can't be placed.
     assert game.stadium is None
     assert game.is_venue_drift is False
+
+
+# ------------------------------------------------------- untimed games and the table
+
+
+@respx.mock
+def test_an_untimed_game_is_included_when_only_its_venue_matters() -> None:
+    untimed = cfb_event("Ohio State", "Minnesota", time_valid=False)
+    respx.get(CFB.scoreboard_url).mock(return_value=httpx.Response(200, json={"events": [untimed]}))
+
+    assert EspnScoreboard(CFB).fetch(DAY) == []
+    (game,) = EspnScoreboard(CFB).fetch(DAY, include_untimed=True)
+
+    assert game.home_team == "Ohio State"
+    assert game.stadium is not None
+
+
+@pytest.mark.parametrize("error", [ValueError("not valid JSON"), FileNotFoundError("gone")])
+def test_a_venue_table_that_cannot_be_read_is_reported_as_that_not_as_a_schedule_problem(
+    error: Exception,
+) -> None:
+    def damaged() -> VenueCatalog:
+        raise error
+
+    broken = dataclasses.replace(CFB, venue_catalog=damaged)
+
+    # No ESPN route is mocked: the table is read first, so the request is never made.
+    with respx.mock, pytest.raises(VenueTableError, match="Top 25 college football venue table"):
+        EspnScoreboard(broken).fetch(DAY)
+
+
+@pytest.mark.parametrize(
+    ("params", "limit"),
+    [
+        ((), None),
+        ((("groups", "80"),), None),
+        ((("groups", "80"), ("limit", "400")), 400),
+        ((("limit", "many"),), None),
+        ((("limit", "²"),), None),
+        ((("limit", ""),), None),
+    ],
+)
+def test_a_sports_event_limit_is_its_limit_parameter_when_that_is_a_number(
+    params: tuple[tuple[str, str], ...], limit: int | None
+) -> None:
+    assert dataclasses.replace(CFB, scoreboard_params=params).event_limit == limit

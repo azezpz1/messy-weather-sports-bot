@@ -66,6 +66,13 @@ class Sport:
     """Decides which games the sport covers: returns why a game is left out, or None to
     keep it. Applied before any weather lookup, so a game left out costs no requests."""
 
+    @property
+    def event_limit(self) -> int | None:
+        """The most events a scoreboard request asks for (its `limit` parameter), if it sets
+        one - a response that size may have been cut short."""
+        value = dict(self.scoreboard_params).get("limit", "")
+        return int(value) if value.isascii() and value.isdigit() else None
+
     def game_day_for(self, instant: dt.datetime) -> dt.date:
         """The game day `instant` falls on. Raises ValueError for a timezone-naive
         datetime rather than silently assuming the machine's local timezone."""

@@ -30,9 +30,50 @@ def test_each_sports_job_checks_only_its_own_sport() -> None:
     assert commands == {"nfl": ["nfl"], "cfb": ["cfb"]}
 
 
+def run_scripts(text: str) -> list[str]:
+    """The script of every `run:` step: its value when that is on the same line, or - for a
+    block (`run: |`) - every line indented under it."""
+    lines = text.splitlines()
+    scripts: list[str] = []
+    for index, line in enumerate(lines):
+        match = re.match(r"^(\s*(?:-\s+)?)run:\s*(.*)$", line)
+        if match is None:
+            continue
+        value = match.group(2)
+        if not value.startswith(("|", ">")):
+            scripts.append(value)
+            continue
+        key_column = len(match.group(1))
+        body: list[str] = []
+        for following in lines[index + 1 :]:
+            if following.strip() and len(following) - len(following.lstrip()) <= key_column:
+                break
+            body.append(following)
+        scripts.append("\n".join(body))
+    return scripts
+
+
 def test_no_run_step_interpolates_an_expression() -> None:
     # Expressions in a script body are how workflow injection happens; pass values via env.
-    run_lines = [line for line in TEXT.splitlines() if line.strip().startswith("run:")]
+    scripts = run_scripts(TEXT)
 
-    assert run_lines
-    assert not [line for line in run_lines if "${{" in line]
+    assert scripts
+    assert not [script for script in scripts if "${{" in script]
+
+
+def test_the_run_step_scan_reads_block_scripts_and_list_items_too() -> None:
+    sample = (
+        "steps:\n"
+        "  - name: Greet\n"
+        "    run: |\n"
+        "      echo start\n"
+        '      echo "${{ github.event.pull_request.title }}"\n'
+        "  - run: uv sync\n"
+        "  - name: After\n"
+        "    run: echo ok\n"
+    )
+
+    scripts = run_scripts(sample)
+
+    assert [("${{" in script) for script in scripts] == [True, False, False]
+    assert scripts[1:] == ["uv sync", "echo ok"]

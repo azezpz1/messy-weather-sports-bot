@@ -139,7 +139,8 @@ partially posted.
 State files live at `$XDG_STATE_HOME/messy-weather-bot/<date>.json` (or
 `~/.local/state/messy-weather-bot/<date>.json` if `XDG_STATE_HOME` isn't
 set), overridable via `MESSY_WEATHER_STATE_DIR`. `--dry-run` never reads or
-writes this state.
+writes this state. (The [college football bot](#college-football-top-25) keeps its
+own, beside it, as `<date>.cfb.json`.)
 
 ### Failure alerting with Healthchecks.io
 

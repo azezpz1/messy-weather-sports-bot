@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 import httpx
 
-from messy_weather_sports_bot.espn import EspnScoreboard
+from messy_weather_sports_bot.espn import EspnScoreboard, VenueTableError
 from messy_weather_sports_bot.schedule import todays_game_day, venue_drift
 from messy_weather_sports_bot.sport import Sport
 
@@ -36,7 +36,8 @@ class DriftReport:
     end: dt.date
     games_checked: int = 0
     drift: list[str] = field(default_factory=list)
-    """Why each unrecognized venue wasn't, e.g. 'unrecognized venue "X" (espn venue id ...)'."""
+    """Why each unrecognized venue wasn't, e.g. 'unrecognized venue "X" (espn venue id ...)'.
+    One entry per venue, however many games in the window are played there."""
 
 
 def check_drift(
@@ -54,9 +55,15 @@ def check_drift(
     for offset in range(days):
         date = start + dt.timedelta(days=offset)
         try:
-            games = scoreboard.fetch(date)
+            # Untimed games too: only where a game is played matters here, and ESPN leaves
+            # most kickoff times unset until a week or two ahead.
+            games = scoreboard.fetch(date, include_untimed=True)
+        except VenueTableError as exc:
+            raise DriftCheckError(f"cannot check venues: {exc}") from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise DriftCheckError(f"could not fetch schedule for {date}: {exc}") from exc
         report.games_checked += len(games)
-        report.drift.extend(venue_drift(games))
+        for reason in venue_drift(games):
+            if reason not in report.drift:
+                report.drift.append(reason)
     return report

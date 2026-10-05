@@ -11,7 +11,7 @@ import httpx
 
 from messy_weather_sports_bot import state
 from messy_weather_sports_bot.alerts import WeatherAlert, get_active_alerts
-from messy_weather_sports_bot.espn import EspnScoreboard
+from messy_weather_sports_bot.espn import EspnScoreboard, VenueTableError
 from messy_weather_sports_bot.formatting import build_post_texts, format_kickoff
 from messy_weather_sports_bot.messiness import GameWeather, evaluate_game, sort_by_messiness
 from messy_weather_sports_bot.poster import POSTERS
@@ -137,6 +137,10 @@ class GameDayPipeline:
             dry_run = True
         try:
             games = EspnScoreboard(sport).fetch(date)
+        except VenueTableError as exc:
+            logger.error("Cannot run: %s", exc)
+            _log_run_summary(None, _Evaluation(), [], None)
+            return EXIT_NOTHING_POSTED
         except (httpx.HTTPError, ValueError) as exc:
             logger.error(
                 "Could not fetch the %s schedule for %s: %s", sport.name, date.isoformat(), exc
@@ -199,21 +203,31 @@ class GameDayPipeline:
         return exit_code
 
     def _rankings_missing(self, games: list[Game]) -> bool:
-        """Whether a sport that reads rankings got none on a slate big enough to have them.
-        Warns once; the caller turns "nothing to post" into a degraded run rather than a
-        clean one."""
-        if (
-            not self.sport.parse_rankings
-            or len(games) < RANKINGS_CHECK_MIN_GAMES
-            or any(game.rankings_reported for game in games)
-        ):
+        """Whether a sport that reads rankings can't rely on them today: ESPN sent none on a
+        slate big enough to have them, or sent some this bot can't read. Either means its
+        response changed, and a filter on rankings would quietly drop games. Warns once;
+        the caller turns "nothing to post" into a degraded run rather than a clean one."""
+        if not self.sport.parse_rankings:
             return False
-        logger.warning(
-            "ESPN reported no rankings for any of the %d games on this slate, so a ranking "
-            "filter would drop them all; its response may have changed.",
-            len(games),
-        )
-        return True
+        unreadable = sum(game.rankings_unreadable for game in games)
+        if unreadable:
+            logger.warning(
+                "ESPN sent a ranking this bot can't read for %d of the %d games on this slate; "
+                "its response may have changed.",
+                unreadable,
+                len(games),
+            )
+            return True
+        if len(games) >= RANKINGS_CHECK_MIN_GAMES and not any(
+            game.rankings_reported for game in games
+        ):
+            logger.warning(
+                "ESPN reported no rankings for any of the %d games on this slate, so a ranking "
+                "filter would drop them all; its response may have changed.",
+                len(games),
+            )
+            return True
+        return False
 
     def _evaluate(self, games: list[Game]) -> _Evaluation:
         """Look up the weather for every game that applies it to, and score it."""

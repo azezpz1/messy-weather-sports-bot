@@ -40,8 +40,11 @@ class Game:
     neutral_site: bool = False
     """True when the game isn't at either team's home field (and the sport reads it)."""
     rankings_reported: bool = False
-    """True when ESPN sent a ranking field for this game's teams at all - ranked or not -
-    so a run can tell "nobody is ranked" from "ESPN stopped sending rankings"."""
+    """True when ESPN sent a readable ranking for this game's teams - ranked or not - so a
+    run can tell "nobody is ranked" from "ESPN stopped sending rankings"."""
+    rankings_unreadable: bool = False
+    """True when a team had a ranking field this bot couldn't read (not a whole number),
+    which means ESPN's format changed, not that the team is unranked."""
 
 
 def todays_game_day(sport: Sport, now: dt.datetime | None = None) -> dt.date:

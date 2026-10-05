@@ -1,6 +1,7 @@
 """The venue drift check: which games it looks at, what counts as drift, and the command
 line around it."""
 
+import dataclasses
 import datetime as dt
 import importlib.util
 from pathlib import Path
@@ -13,6 +14,7 @@ import respx
 from messy_weather_sports_bot.cfb import CFB
 from messy_weather_sports_bot.drift import DAYS_TO_CHECK, DriftCheckError, check_drift
 from messy_weather_sports_bot.nfl import NFL
+from messy_weather_sports_bot.venues import VenueCatalog
 from tests.support.espn import cfb_event, espn_event
 
 START = dt.date(2026, 1, 11)
@@ -74,6 +76,47 @@ def test_every_game_is_checked_not_only_the_ranked_ones() -> None:
     assert report.games_checked == 1
     assert len(report.drift) == 1
     assert 'unrecognized venue "Brand New Stadium"' in report.drift[0]
+
+
+@respx.mock
+def test_a_venue_hosting_several_games_is_reported_once() -> None:
+    # Two games on the same day and a third later in the week, all at the one new venue.
+    def at_new_stadium(day: str, home: str) -> dict:
+        event = cfb_event(home, "Away", venue_id="99999", venue_name="Brand New Stadium")
+        return at_kickoff(day, event)
+
+    sunday = [at_new_stadium("20260111", "Home A"), at_new_stadium("20260111", "Home B")]
+    mock_week(CFB, {"20260111": sunday, "20260114": [at_new_stadium("20260114", "Home C")]})
+
+    with httpx.Client() as client:
+        report = check_drift(CFB, client, start=START)
+
+    assert report.games_checked == 3
+    assert len(report.drift) == 1
+
+
+@respx.mock
+def test_a_game_with_no_kickoff_time_yet_is_still_checked_for_its_venue() -> None:
+    # ESPN leaves most kickoff times unset until a week or two ahead; only the venue
+    # matters here, so such a game must not slip past the check.
+    untimed = cfb_event("Home", "Away", venue_id="99999", venue_name="Brand New Stadium")
+    untimed["competitions"][0]["timeValid"] = False
+    mock_week(CFB, {"20260111": [at_kickoff("20260111", untimed)]})
+
+    with httpx.Client() as client:
+        report = check_drift(CFB, client, start=START)
+
+    assert report.games_checked == 1
+    assert len(report.drift) == 1
+
+
+@respx.mock
+def test_a_damaged_venue_table_is_reported_as_that_not_as_an_espn_problem() -> None:
+    def damaged() -> VenueCatalog:
+        raise ValueError("cfb_venues.json: not valid JSON")
+
+    with httpx.Client() as client, pytest.raises(DriftCheckError, match="cannot check venues"):
+        check_drift(dataclasses.replace(CFB, venue_catalog=damaged), client, start=START)
 
 
 @respx.mock

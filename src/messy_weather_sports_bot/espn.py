@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-from dataclasses import replace
 
 import httpx
 
@@ -24,6 +23,11 @@ MAX_RANK = 25
 """The last place in the poll; ESPN gives an unranked team 99."""
 
 
+class VenueTableError(Exception):
+    """The sport's venue table couldn't be read - a problem with the bot's own data, not
+    with ESPN, and worth saying so."""
+
+
 class EspnScoreboard:
     """A sport's ESPN scoreboard. `client` is optional - pass one to reuse a connection
     (or, in tests, to control transport); otherwise each fetch uses its own."""
@@ -32,17 +36,25 @@ class EspnScoreboard:
         self._sport = sport
         self._client = client
 
-    def fetch(self, game_day: dt.date) -> list[Game]:
-        """The sport's games scheduled for `game_day` (a date in its game-day timezone)."""
+    def fetch(self, game_day: dt.date, *, include_untimed: bool = False) -> list[Game]:
+        """The sport's games scheduled for `game_day` (a date in its game-day timezone).
+
+        A game whose kickoff time ESPN hasn't set yet is left out - its time is a
+        placeholder, and so would be any forecast window built from it - unless
+        `include_untimed` (the venue drift check needs only where a game is played).
+        Raises VenueTableError if the sport's venue table can't be read."""
+        try:
+            catalog = self._sport.venue_catalog()
+        except (ValueError, OSError) as exc:
+            raise VenueTableError(f"the {self._sport.name} venue table: {exc}") from exc
         events = self._events(self._get_payload(game_day))
-        limit = dict(self._sport.scoreboard_params).get("limit")
-        if limit and limit.isdigit() and len(events) >= int(limit):
+        limit = self._sport.event_limit
+        if limit is not None and len(events) >= limit:
             logger.warning(
                 "ESPN returned %d events, the most it was asked for: games may be missing from %s",
                 len(events),
                 game_day.isoformat(),
             )
-        catalog = self._sport.venue_catalog()
 
         games: list[Game] = []
         for event in events:
@@ -51,7 +63,7 @@ class EspnScoreboard:
                 raise ValueError(
                     f"Unexpected ESPN scoreboard event shape: expected object, got {kind}"
                 )
-            game = self._parse_event(event, game_day, catalog)
+            game = self._parse_event(event, game_day, catalog, include_untimed)
             if game is not None:
                 games.append(game)
         return games
@@ -92,16 +104,16 @@ class EspnScoreboard:
             )
         return events
 
-    def _parse_event(self, event: dict, game_day: dt.date, catalog: VenueCatalog) -> Game | None:
+    def _parse_event(
+        self, event: dict, game_day: dt.date, catalog: VenueCatalog, include_untimed: bool
+    ) -> Game | None:
         competitions = event.get("competitions") or []
         if not competitions:
             return None
         competition = competitions[0]
         label = event.get("shortName") or event.get("name") or event.get("id")
 
-        if competition.get("timeValid") is False:
-            # ESPN's placeholder for a kickoff it hasn't set: the time is a guess, so is
-            # any forecast window built from it.
+        if competition.get("timeValid") is False and not include_untimed:
             logger.info("Skipping ESPN event %r: its kickoff time is not set yet", label)
             return None
 
@@ -141,7 +153,9 @@ class EspnScoreboard:
             catalog, home_team, venue, venue_present=raw_venue is not None
         )
 
-        game = Game(
+        home_rank, home_reported, home_unreadable = self._rank(home)
+        away_rank, away_reported, away_unreadable = self._rank(away)
+        return Game(
             home_team=home_team,
             away_team=away_team,
             kickoff=kickoff,
@@ -150,38 +164,34 @@ class EspnScoreboard:
             venue_id=str(venue.get("id") or ""),
             unresolved_reason=unresolved_reason,
             is_venue_drift=is_venue_drift,
+            home_rank=home_rank,
+            away_rank=away_rank,
+            neutral_site=self._sport.parse_neutral_site and competition.get("neutralSite") is True,
+            rankings_reported=home_reported or away_reported,
+            rankings_unreadable=home_unreadable or away_unreadable,
         )
-        if self._sport.parse_neutral_site:
-            game = replace(game, neutral_site=competition.get("neutralSite") is True)
-        if self._sport.parse_rankings:
-            home_rank, home_reported = self._rank(home)
-            away_rank, away_reported = self._rank(away)
-            game = replace(
-                game,
-                home_rank=home_rank,
-                away_rank=away_rank,
-                rankings_reported=home_reported or away_reported,
-            )
-        return game
 
     def _team_label(self, competitor: dict) -> str | None:
-        """The first non-blank of the sport's `team_label_fields` on the competitor's team."""
+        """The first non-blank of the sport's `team_label_fields` on the competitor's team,
+        without the whitespace around it."""
         team = competitor.get("team")
         if not isinstance(team, dict):
             return None
         for name in self._sport.team_label_fields:
             value = team.get(name)
             if isinstance(value, str) and value.strip():
-                return value
+                return value.strip()
         return None
 
-    @staticmethod
-    def _rank(competitor: dict) -> tuple[int | None, bool]:
-        """(the team's ranking if it's in the poll, whether ESPN sent a ranking at all).
-        ESPN gives an unranked team 99, so only a real integer 1-25 counts as ranked; a
-        bool is an int in Python but never a ranking."""
-        curated = competitor.get("curatedRank")
+    def _rank(self, competitor: dict) -> tuple[int | None, bool, bool]:
+        """(the team's ranking if it's in the poll, whether ESPN sent a readable one, whether
+        it sent one this bot can't read). ESPN gives an unranked team 99, so only a real
+        integer 1-25 counts as ranked; a bool is an int in Python but never a ranking. A
+        sport that doesn't read rankings gets (None, False, False)."""
+        if not self._sport.parse_rankings or "curatedRank" not in competitor:
+            return None, False, False
+        curated = competitor["curatedRank"]
         current = curated.get("current") if isinstance(curated, dict) else None
         if isinstance(current, bool) or not isinstance(current, int):
-            return None, False
-        return (current if 1 <= current <= MAX_RANK else None), True
+            return None, False, True
+        return (current if 1 <= current <= MAX_RANK else None), True, False

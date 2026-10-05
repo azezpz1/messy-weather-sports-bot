@@ -133,3 +133,22 @@ def test_resolve_venue_reports_an_unrecognized_home_team_without_a_venue() -> No
         "unrecognized home team 'XYZ'",
         False,
     )
+
+
+def test_a_catalog_without_team_stadiums_says_no_venue_was_reported() -> None:
+    # A college catalog has no "home team's usual stadium" to fall back on, so a team isn't
+    # "unrecognized" - ESPN just didn't say where the game is.
+    catalog = VenueCatalog([OLD_PARK])
+
+    assert catalog.has_team_stadiums is False
+    assert resolve_venue(catalog, "Ohio State", {}, venue_present=False) == (
+        None,
+        "no venue reported for 'Ohio State'",
+        False,
+    )
+
+
+def test_a_catalog_with_team_stadiums_still_names_an_unrecognized_team() -> None:
+    catalog = VenueCatalog([OLD_PARK], by_team={"OLD": OLD_PARK})
+
+    assert catalog.has_team_stadiums is True

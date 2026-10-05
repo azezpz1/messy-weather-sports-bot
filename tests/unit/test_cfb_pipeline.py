@@ -283,6 +283,34 @@ def test_a_slate_where_only_some_games_lack_rankings_is_not_suspect(
     assert caplog.text == ""
 
 
+@respx.mock
+def test_rankings_that_change_form_for_ranked_teams_are_a_degraded_run_not_a_quiet_one(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # ESPN still sends 99 for unranked teams, but a ranked team's value became a string.
+    # Every ranked game would be filtered out; the unranked 99s must not hide that.
+    events = [cfb_event("Ohio State", "Minnesota", home_rank="1"), *unranked_slate(7)]
+    mock_slate(CFB, events)
+
+    with caplog.at_level(logging.WARNING, logger=LOGGER):
+        exit_code = run()
+
+    assert exit_code == EXIT_PARTIAL
+    assert "a ranking this bot can't read for 1 of the 8 games" in caplog.text
+
+
+@respx.mock
+def test_one_unreadable_ranking_on_a_small_slate_is_enough_to_say_so(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    mock_slate(CFB, [cfb_event("Ohio State", "Minnesota", home_rank="1")])
+
+    with caplog.at_level(logging.WARNING, logger=LOGGER):
+        assert run() == EXIT_PARTIAL
+
+    assert "can't read for 1 of the 1 games" in caplog.text
+
+
 # --------------------------------------------- separate accounts, state, healthcheck
 
 
@@ -357,7 +385,7 @@ def test_an_unreachable_schedule_is_nothing_posted_for_either_sport(sport: Sport
 
 @respx.mock
 def test_a_damaged_venue_table_fails_only_the_college_run(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
     cfb_catalog.cache_clear()
 
@@ -368,10 +396,15 @@ def test_a_damaged_venue_table_fails_only_the_college_run(
     mock_slate(CFB, [cfb_event("Ohio State", "Minnesota", home_rank=1)])
     mock_slate(NFL, [espn_event("MIN", "DET")])
     try:
-        assert run(CFB) == EXIT_NOTHING_POSTED
+        with caplog.at_level(logging.ERROR, logger=LOGGER):
+            assert run(CFB) == EXIT_NOTHING_POSTED
         assert run(NFL) == EXIT_OK
     finally:
         cfb_catalog.cache_clear()
+
+    # The log blames the bot's own table, not ESPN.
+    assert "Cannot run: the Top 25 college football venue table: cfb_venues.json" in caplog.text
+    assert "Could not fetch" not in caplog.text
 
 
 @respx.mock
