@@ -25,6 +25,11 @@ def format_kickoff(kickoff: dt.datetime, sport: Sport) -> str:
     return f"{hour}:{local.minute:02d}{period} {sport.timezone_label}"
 
 
+def _team_label(name: str, rank: int | None) -> str:
+    """A team's name, with its poll ranking in front when it has one: "#4 Ohio State"."""
+    return name if rank is None else f"#{rank} {name}"
+
+
 def format_game_line(gw: GameWeather, sport: Sport) -> str:
     emoji = EMOJI[gw.condition]
     weather = gw.weather
@@ -41,10 +46,12 @@ def format_game_line(gw: GameWeather, sport: Sport) -> str:
         parts.append(temperature)
     if weather.wind_speed_mph > 0:
         parts.append(f"{weather.wind_speed_mph:g}mph wind")
-    line = (
-        f"{sport.game_emoji} {gw.game.away_team} @ {gw.game.home_team} ({kickoff}): "
-        f"{emoji} {', '.join(parts)}"
-    )
+    game = gw.game
+    away = _team_label(game.away_team, game.away_rank)
+    home = _team_label(game.home_team, game.home_rank)
+    # At a neutral site neither team is the host, so "@" would be wrong.
+    separator = "vs" if game.neutral_site else "@"
+    line = f"{sport.game_emoji} {away} {separator} {home} ({kickoff}): {emoji} {', '.join(parts)}"
     if gw.alert is not None:
         line += f" ⚠️ {gw.alert.event}"
     return line

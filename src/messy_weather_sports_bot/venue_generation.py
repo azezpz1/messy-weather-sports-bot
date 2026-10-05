@@ -33,7 +33,7 @@ from typing import Protocol
 
 import httpx
 
-from messy_weather_sports_bot.espn import CFB_SCOREBOARD_URL
+from messy_weather_sports_bot.cfb import CFB
 from messy_weather_sports_bot.retry import request_with_retry
 from messy_weather_sports_bot.venue_table import COORDINATE_DECIMALS, VenueRow, id_order
 from messy_weather_sports_bot.venues import VenueCatalog, is_confirmed_international
@@ -365,8 +365,9 @@ def harvest(
 
             def _get(day: dt.date = day) -> httpx.Response:
                 response = client.get(
-                    CFB_SCOREBOARD_URL,
-                    params={"dates": day.strftime("%Y%m%d"), "groups": "80", "limit": "400"},
+                    CFB.scoreboard_url,
+                    # The bot's own query, so the table covers the games the bot fetches.
+                    params={"dates": day.strftime("%Y%m%d"), **dict(CFB.scoreboard_params)},
                 )
                 response.raise_for_status()
                 return response

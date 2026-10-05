@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from messy_weather_sports_bot.alerts import AlertSeverity, WeatherAlert
+from messy_weather_sports_bot.cfb import CFB
 from messy_weather_sports_bot.formatting import build_post_texts, format_game_line, format_header
 from messy_weather_sports_bot.messiness import evaluate_game
 from messy_weather_sports_bot.nfl import NFL
@@ -203,3 +204,93 @@ def test_build_post_texts_leads_with_the_sports_header() -> None:
 
     assert "Messy west coast games to watch" in texts[0]
     assert "NFL" not in texts[0]
+
+
+# ------------------------------------------------------------ college football lines
+
+
+def make_college_weather(
+    home: str,
+    away: str,
+    *,
+    home_rank: int | None = None,
+    away_rank: int | None = None,
+    neutral_site: bool = False,
+    short_forecast: str = "Rain",
+    wind_speed_mph: float = 12.0,
+    temperature_f: int = 45,
+    alerts: list[WeatherAlert] | None = None,
+):
+    game = Game(
+        home_team=home,
+        away_team=away,
+        kickoff=dt.datetime(2026, 1, 18, 23, 30, tzinfo=dt.UTC),
+        stadium=stadium_for_team("GB"),
+        home_rank=home_rank,
+        away_rank=away_rank,
+        neutral_site=neutral_site,
+    )
+    weather = WeatherReport(
+        short_forecast=short_forecast,
+        temperature_f=temperature_f,
+        wind_speed_mph=wind_speed_mph,
+        precipitation_probability=80,
+    )
+    return evaluate_game(game, [weather], alerts)
+
+
+def test_a_college_line_numbers_each_ranked_team() -> None:
+    gw = make_college_weather("Penn State", "Ohio State", home_rank=12, away_rank=4)
+
+    assert format_game_line(gw, CFB) == (
+        "🏈 #4 Ohio State @ #12 Penn State (6:30pm ET): 🌧️ Rain, 45°F (feels 39°F), 12mph wind"
+    )
+
+
+def test_only_the_ranked_team_gets_a_number() -> None:
+    line = format_game_line(make_college_weather("Pitt", "Notre Dame", away_rank=21), CFB)
+
+    assert line.startswith("🏈 #21 Notre Dame @ Pitt (")
+
+
+def test_a_neutral_site_game_says_vs_because_neither_team_is_the_host() -> None:
+    gw = make_college_weather("Texas", "Oklahoma", away_rank=6, neutral_site=True)
+
+    assert format_game_line(gw, CFB).startswith("🏈 #6 Oklahoma vs Texas (")
+
+
+def test_a_game_with_no_ranks_and_no_neutral_site_reads_exactly_like_an_nfl_line() -> None:
+    gw = make_game_weather("GB", "CHI", "Snow")
+
+    assert format_game_line(gw, NFL).startswith("🏈 CHI @ GB (1:00pm ET): ❄️ Snow")
+
+
+def test_the_college_header_is_a_recommendation_of_top_25_games() -> None:
+    assert (
+        format_header(GAME_DATE, CFB)
+        == "🌩️ Messy Top 25 college football games to watch — Sun Jan 18"
+    )
+
+
+def test_the_longest_realistic_college_line_stays_well_inside_a_post() -> None:
+    alert = WeatherAlert(
+        event="Severe Thunderstorm Warning",
+        severity=AlertSeverity.WARNING,
+        onset=dt.datetime(2026, 1, 18, 22, 0, tzinfo=dt.UTC),
+        ends=dt.datetime(2026, 1, 19, 2, 0, tzinfo=dt.UTC),
+    )
+    gw = make_college_weather(
+        "North Carolina",
+        "Louisiana-Monroe",
+        home_rank=25,
+        away_rank=23,
+        neutral_site=True,
+        short_forecast="Showers And Thunderstorms Likely",
+        temperature_f=92,
+        alerts=[alert],
+    )
+
+    line = format_game_line(gw, CFB)
+
+    assert len(line) < 200
+    assert all(len(text) <= 280 for text in build_post_texts([gw] * 12, GAME_DATE, CFB))

@@ -1,7 +1,7 @@
 [project]
 name = "messy-weather-sports-bot"
 version = "3.0.0"
-description = "Posts messy NFL game-day weather to social media"
+description = "Posts messy NFL and Top 25 college football game-day weather to social media"
 authors = [
     { name = "Anthony Panettiere" }
 ]
@@ -14,6 +14,7 @@ dependencies = [
 
 [project.scripts]
 messy-weather-nfl-bot = "messy_weather_sports_bot.nfl:main"
+messy-weather-cfb-bot = "messy_weather_sports_bot.cfb:main"
 
 [build-system]
 requires = ["uv_build>=0.8.17,<0.13.0"]

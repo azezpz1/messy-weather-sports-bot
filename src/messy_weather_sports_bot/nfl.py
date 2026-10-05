@@ -23,6 +23,7 @@ NFL = Sport(
     header_title="Messy NFL games to watch",
     game_emoji="\U0001f3c8",
     venue_catalog=lambda: NFL_CATALOG,
+    venue_update_hint="Update src/messy_weather_sports_bot/stadiums.py with the new venue.",
 )
 
 

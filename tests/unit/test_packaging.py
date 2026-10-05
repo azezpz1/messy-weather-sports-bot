@@ -26,6 +26,13 @@ def test_nfl_console_script_is_kept() -> None:
     assert "messy-weather-nfl-bot" in PYPROJECT["project"]["scripts"]
 
 
+def test_cfb_console_script_runs_the_college_football_bot() -> None:
+    assert (
+        PYPROJECT["project"]["scripts"]["messy-weather-cfb-bot"]
+        == "messy_weather_sports_bot.cfb:main"
+    )
+
+
 def test_every_console_script_target_is_importable() -> None:
     for name, target in PYPROJECT["project"]["scripts"].items():
         module_name, _, attribute = target.partition(":")
