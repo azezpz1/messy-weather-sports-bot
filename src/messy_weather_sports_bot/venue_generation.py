@@ -1129,8 +1129,7 @@ def format_report(result: BuildResult, *, venues_seen: int) -> str:
         for row, notes in report.added:
             detail = f" [{'; '.join(notes)}]" if notes else ""
             line(
-                f"  {row.id:>6} {row.name}, {row.city}, {row.state}: "
-                f"{row.latitude:.5f}, {row.longitude:.5f} ({row.precision}, "
+                f"  {row.id:>6} {row.name}, {row.city}, {row.state}: ({row.precision}, "
                 f"{'covered' if row.is_covered else 'open'}, {row.source}){detail}"
             )
     if report.changed:
