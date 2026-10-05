@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 import re
 import time
 import unicodedata
@@ -103,34 +104,136 @@ US_STATES: dict[str, str] = {
     "PR": "Puerto Rico",
 }
 
+# (south, north, west, east), a little generous: the check is "this point is in that
+# state, not another one", which is what a wrong-city geocode would break.
+STATE_BOXES: dict[str, tuple[float, float, float, float]] = {
+    "AL": (30.1, 35.1, -88.6, -84.8),
+    "AK": (51.0, 71.5, -180.0, -129.9),
+    "AZ": (31.2, 37.1, -114.9, -109.0),
+    "AR": (33.0, 36.6, -94.7, -89.6),
+    "CA": (32.4, 42.1, -124.5, -114.1),
+    "CO": (36.9, 41.1, -109.1, -102.0),
+    "CT": (40.9, 42.1, -73.8, -71.7),
+    "DE": (38.4, 39.9, -75.8, -75.0),
+    "DC": (38.78, 39.0, -77.15, -76.9),
+    "FL": (24.4, 31.1, -87.7, -79.9),
+    "GA": (30.3, 35.1, -85.7, -80.7),
+    "HI": (18.8, 22.3, -160.3, -154.7),
+    "ID": (41.9, 49.1, -117.3, -111.0),
+    "IL": (36.9, 42.6, -91.6, -87.0),
+    "IN": (37.7, 41.8, -88.2, -84.7),
+    "IA": (40.3, 43.6, -96.7, -90.1),
+    "KS": (36.9, 40.1, -102.1, -94.5),
+    "KY": (36.4, 39.2, -89.6, -81.9),
+    "LA": (28.9, 33.1, -94.1, -88.7),
+    "ME": (42.9, 47.5, -71.2, -66.9),
+    "MD": (37.8, 39.8, -79.5, -75.0),
+    "MA": (41.2, 42.9, -73.6, -69.9),
+    "MI": (41.6, 48.4, -90.5, -82.1),
+    "MN": (43.4, 49.5, -97.3, -89.4),
+    "MS": (30.1, 35.1, -91.7, -88.0),
+    "MO": (35.9, 40.7, -95.8, -89.0),
+    "MT": (44.3, 49.1, -116.1, -104.0),
+    "NE": (39.9, 43.1, -104.1, -95.2),
+    "NV": (35.0, 42.1, -120.1, -114.0),
+    "NH": (42.6, 45.4, -72.6, -70.6),
+    "NJ": (38.9, 41.4, -75.6, -73.8),
+    "NM": (31.3, 37.1, -109.1, -103.0),
+    "NY": (40.4, 45.1, -79.8, -71.8),
+    "NC": (33.8, 36.7, -84.4, -75.4),
+    "ND": (45.9, 49.1, -104.1, -96.5),
+    "OH": (38.3, 42.0, -84.9, -80.5),
+    "OK": (33.6, 37.1, -103.1, -94.4),
+    "OR": (41.9, 46.3, -124.7, -116.4),
+    "PA": (39.7, 42.3, -80.6, -74.6),
+    "RI": (41.1, 42.1, -71.9, -71.1),
+    "SC": (32.0, 35.3, -83.4, -78.5),
+    "SD": (42.4, 45.95, -104.1, -96.4),
+    "TN": (34.9, 36.7, -90.4, -81.6),
+    "TX": (25.8, 36.6, -106.7, -93.5),
+    "UT": (36.9, 42.1, -114.1, -109.0),
+    "VT": (42.7, 45.1, -73.5, -71.4),
+    "VA": (36.5, 39.5, -83.7, -75.2),
+    "WA": (45.5, 49.1, -124.9, -116.9),
+    "WV": (37.1, 40.7, -82.7, -77.7),
+    "WI": (42.4, 47.4, -92.9, -86.7),
+    "WY": (40.9, 45.1, -111.1, -104.0),
+    "PR": (17.8, 18.6, -67.4, -65.2),
+}
+
+
+def row_problems(row: VenueRow) -> list[str]:
+    """Why `row` shouldn't go in the table (empty if it's fine): a blank name, city or
+    state - which the table's own parser would refuse to read back - an unknown state, or
+    coordinates outside the row's state, such as an override with a dropped minus sign."""
+    problems = [
+        f"{label} is blank"
+        for label, value in (("name", row.name), ("city", row.city), ("state", row.state))
+        if not value.strip()
+    ]
+    box = STATE_BOXES.get(row.state)
+    if row.state.strip() and box is None:
+        problems.append(f"unknown state {row.state!r}")
+    elif box is not None:
+        south, north, west, east = box
+        if not (south <= row.latitude <= north and west <= row.longitude <= east):
+            where = f"{row.latitude:.5f}, {row.longitude:.5f}"
+            problems.append(f"coordinates {where} are outside {row.state}")
+    return problems
+
+
 # --------------------------------------------------------------------------- harvest
+
+
+def _most_common(counter: Counter[str]) -> str:
+    """The value seen most often (ties go to the alphabetically first), or "" if none -
+    so the answer never depends on the order games arrived in."""
+    return min(counter, key=lambda value: (-counter[value], value)) if counter else ""
 
 
 @dataclass
 class VenueObservation:
-    """What ESPN's scoreboards reported about one venue id, over every game seen."""
+    """What ESPN's scoreboards reported about one venue id, over every game seen. A name,
+    city, state or country is the one reported most often; a blank is never counted, so
+    a game that omits a field can't blank it out."""
 
     venue_id: str
     names: Counter[str] = field(default_factory=Counter)
-    city: str = ""
-    state: str = ""
-    country: str = ""
+    cities: Counter[str] = field(default_factory=Counter)
+    states: Counter[str] = field(default_factory=Counter)
+    countries: Counter[str] = field(default_factory=Counter)
     indoor: bool = False
     games: int = 0
-    neutral_games: int = 0
 
     @property
     def name(self) -> str:
-        """The name most often reported (ties go to the alphabetically first)."""
-        return min(self.names, key=lambda n: (-self.names[n], n))
+        return _most_common(self.names)
 
     @property
     def other_names(self) -> tuple[str, ...]:
-        return tuple(sorted(n for n in self.names if n != self.name))
+        return tuple(sorted(name for name in self.names if name != self.name))
+
+    @property
+    def city(self) -> str:
+        return _most_common(self.cities)
+
+    @property
+    def state(self) -> str:
+        return _most_common(self.states)
+
+    @property
+    def country(self) -> str:
+        return _most_common(self.countries)
 
     @property
     def address(self) -> dict:
         return {"city": self.city, "state": self.state, "country": self.country}
+
+    def describe(self) -> str:
+        return (
+            f"{self.name or '(unnamed)'}, {self.city or '?'}, {self.state or '?'} "
+            f"({self.games} game(s))"
+        )
 
 
 @dataclass
@@ -172,13 +275,17 @@ def observe_scoreboard(payload: object, harvest: Harvest) -> None:
         else:
             observation = harvest.venues.setdefault(venue_id, VenueObservation(venue_id))
             address = venue.get("address") or {}
-            observation.names[str(venue.get("fullName") or "").strip()] += 1
-            observation.city = str(address.get("city") or observation.city)
-            observation.state = str(address.get("state") or observation.state)
-            observation.country = str(address.get("country") or observation.country)
+            for counter, value in (
+                (observation.names, venue.get("fullName")),
+                (observation.cities, address.get("city")),
+                (observation.states, address.get("state")),
+                (observation.countries, address.get("country")),
+            ):
+                text = str(value or "").strip()
+                if text:
+                    counter[text] += 1
             observation.indoor = observation.indoor or bool(venue.get("indoor"))
             observation.games += 1
-            observation.neutral_games += neutral
         for competitor in competition.get("competitors") or []:
             team = competitor.get("team") or {}
             team_id = str(team.get("id") or "")
@@ -279,10 +386,6 @@ def _tokens(text: str) -> tuple[str, ...]:
         if word:
             tokens.append(word)
     return tuple(tokens)
-
-
-def _norm(text: str) -> str:
-    return " ".join(_tokens(text))
 
 
 def _clean_name(name: str) -> str:
@@ -456,18 +559,24 @@ class PhotonGeocoder:
         return features
 
     def geocode(self, name: str, city: str, state: str) -> GeocodeOutcome:
+        if not name.strip():
+            return GeocodeOutcome(None, notes=("ESPN gave no venue name",))
         state_name = US_STATES.get(state)
         if state_name is None:
-            return GeocodeOutcome(None, candidates=(f"unknown state code {state!r}",))
+            return GeocodeOutcome(None, notes=(f"unknown state code {state!r}",))
+
+        # Search by stadium tag first, then more widely, under ESPN's name and then its
+        # shorter form - stopping as soon as something in the right city turns up, since a
+        # match in the wrong town (every state has a "Memorial Stadium") is the failure to
+        # avoid, and only worth settling for when nothing in the right town is found.
+        accepted: list[tuple[bool, bool, Geocode]] = []
         rejected: list[str] = []
         for osm_tag, classes in (
             ("leisure:stadium", STADIUM_CLASSES),
             (None, STADIUM_CLASSES | SPORTS_GROUND_CLASSES),
         ):
-            accepted: list[tuple[bool, bool, Geocode]] = []
             for query_name in _query_names(name):
-                query = f"{query_name}, {city}, {state_name}"
-                for feature in self._search(query, osm_tag):
+                for feature in self._search(f"{query_name}, {city}, {state_name}", osm_tag):
                     candidate = parse_photon_feature(feature)
                     if candidate is None:
                         continue
@@ -476,22 +585,24 @@ class PhotonGeocoder:
                         rejected.append(_describe(candidate))
                     else:
                         accepted.append((verdict, _city_matches(candidate, city), candidate))
-                if accepted:
-                    break  # the full name found something; no need to try the short one
-            if accepted:
-                # The right city beats a different one - "Gies Memorial Stadium" in
-                # Champaign is the Illinois field, an exact "Memorial Stadium" in another
-                # town isn't - then an exact name beats a partial one; ties keep Photon's
-                # own ranking.
-                accepted.sort(key=lambda item: (not item[1], not item[0]))
-                _, city_ok, best = accepted[0]
-                notes = []
-                if not city_ok:
-                    notes.append(f"city differs: OSM says {', '.join(best.places) or 'nothing'}")
-                if best.precision != "stadium":
-                    notes.append(f"mapped as {best.osm_key}={best.osm_value}, not a stadium")
-                return GeocodeOutcome(best, tuple(notes))
-        return GeocodeOutcome(None, candidates=tuple(dict.fromkeys(rejected)))
+                if any(city_ok for _, city_ok, _ in accepted):
+                    break
+            if any(city_ok for _, city_ok, _ in accepted):
+                break
+        if not accepted:
+            return GeocodeOutcome(None, candidates=tuple(dict.fromkeys(rejected)))
+
+        # The right city beats a different one - "Gies Memorial Stadium" in Champaign is
+        # the Illinois field, an exact "Memorial Stadium" in another town isn't - then an
+        # exact name beats a partial one; ties keep Photon's own ranking.
+        accepted.sort(key=lambda item: (not item[1], not item[0]))
+        _, city_ok, best = accepted[0]
+        notes = []
+        if not city_ok:
+            notes.append(f"city differs: OSM says {', '.join(best.places) or 'nothing'}")
+        if best.precision != "stadium":
+            notes.append(f"mapped as {best.osm_key}={best.osm_value}, not a stadium")
+        return GeocodeOutcome(best, tuple(notes))
 
 
 def _city_matches(candidate: Geocode, city: str) -> bool:
@@ -554,8 +665,37 @@ class Override:
     state: str | None = None
 
 
+def _optional_text(raw: dict, key: str, venue_id: str) -> str | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"override {venue_id!r}: {key!r} must be a non-blank string")
+    return value
+
+
+def _optional_bool(raw: dict, key: str, venue_id: str) -> bool | None:
+    value = raw.get(key)
+    if value is not None and not isinstance(value, bool):
+        raise ValueError(f"override {venue_id!r}: {key!r} must be true or false, got {value!r}")
+    return value
+
+
+def _optional_coordinate(raw: dict, key: str, venue_id: str, limit: float) -> float | None:
+    value = raw.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, int | float) or isinstance(value, bool) or not math.isfinite(value):
+        raise ValueError(f"override {venue_id!r}: {key!r} must be a number")
+    if not -limit <= value <= limit:
+        raise ValueError(f"override {venue_id!r}: {key!r} out of range: {value!r}")
+    return float(value)
+
+
 def parse_overrides(text: str) -> dict[str, Override]:
-    """Parse the overrides file; raises ValueError (naming the venue) if it's malformed."""
+    """Parse the overrides file as strictly as the table itself is parsed, so a typo can't
+    quietly exclude a venue or put a row in the table that can't be read back. Raises
+    ValueError, naming the venue, if anything is malformed."""
     try:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -579,27 +719,28 @@ def parse_overrides(text: str) -> dict[str, Override]:
             raise ValueError(f"override {venue_id!r} needs a 'note' saying why")
         aliases = raw.get("aliases")
         if aliases is not None and not (
-            isinstance(aliases, list) and all(isinstance(a, str) for a in aliases)
+            isinstance(aliases, list) and all(isinstance(a, str) and a.strip() for a in aliases)
         ):
-            raise ValueError(f"override {venue_id!r}: 'aliases' must be a list of strings")
-        for key in ("latitude", "longitude"):
-            value = raw.get(key)
-            if value is not None and (
-                not isinstance(value, int | float) or isinstance(value, bool)
-            ):
-                raise ValueError(f"override {venue_id!r}: {key!r} must be a number")
-        if (raw.get("latitude") is None) != (raw.get("longitude") is None):
+            raise ValueError(
+                f"override {venue_id!r}: 'aliases' must be a list of non-blank strings"
+            )
+        latitude = _optional_coordinate(raw, "latitude", venue_id, 90)
+        longitude = _optional_coordinate(raw, "longitude", venue_id, 180)
+        if (latitude is None) != (longitude is None):
             raise ValueError(f"override {venue_id!r}: give latitude and longitude together")
+        state = _optional_text(raw, "state", venue_id)
+        if state is not None and state not in US_STATES:
+            raise ValueError(f"override {venue_id!r}: unknown state code {state!r}")
         overrides[str(venue_id)] = Override(
             note=note,
-            exclude=bool(raw.get("exclude", False)),
-            name=raw.get("name"),
+            exclude=bool(_optional_bool(raw, "exclude", venue_id)),
+            name=_optional_text(raw, "name", venue_id),
             aliases=tuple(aliases) if aliases is not None else None,
-            latitude=float(raw["latitude"]) if raw.get("latitude") is not None else None,
-            longitude=float(raw["longitude"]) if raw.get("longitude") is not None else None,
-            is_covered=raw.get("is_covered"),
-            city=raw.get("city"),
-            state=raw.get("state"),
+            latitude=latitude,
+            longitude=longitude,
+            is_covered=_optional_bool(raw, "is_covered", venue_id),
+            city=_optional_text(raw, "city", venue_id),
+            state=state,
         )
     return overrides
 
@@ -655,6 +796,15 @@ def _row_from_override(venue_id: str, override: Override) -> VenueRow | None:
 # ------------------------------------------------------------------------- build
 
 
+@dataclass(frozen=True)
+class Unplaced:
+    """A venue the generator couldn't give a (good) row to, and why."""
+
+    venue_id: str
+    description: str
+    reasons: tuple[str, ...]
+
+
 @dataclass
 class Report:
     added: list[tuple[VenueRow, tuple[str, ...]]] = field(default_factory=list)
@@ -662,14 +812,19 @@ class Report:
     changed: list[tuple[VenueRow, VenueRow]] = field(default_factory=list)
     """(old, new) rows that differ from what was already in the table."""
     kept: int = 0
-    needs_manual: list[tuple[VenueObservation, tuple[str, ...]]] = field(default_factory=list)
+    removed: list[VenueRow] = field(default_factory=list)
+    """Rows that were in the table and aren't in the new one: an exclusion override, or a
+    `--refresh` that found the venue to be outside the US."""
+    needs_manual: list[Unplaced] = field(default_factory=list)
+    unused_overrides: list[str] = field(default_factory=list)
+    """Overrides that matched nothing - a mistyped venue id, or one that's gone stale."""
     international: list[str] = field(default_factory=list)
     excluded: list[str] = field(default_factory=list)
     coverage_gaps: list[str] = field(default_factory=list)
 
     @property
     def needs_attention(self) -> bool:
-        return bool(self.needs_manual or self.coverage_gaps)
+        return bool(self.needs_manual or self.unused_overrides or self.coverage_gaps)
 
 
 @dataclass
@@ -725,8 +880,8 @@ def _resolve(
     geocoder: Geocoder,
 ) -> tuple[VenueRow | None, tuple[str, ...], tuple[str, ...]]:
     """A new row for `observation`, with reviewer notes - or, if it can't be placed,
-    None and what was rejected. The NFL table is tried first, then an override's own
-    coordinates (no need to geocode what's already been placed by hand), then Photon."""
+    None and why not. The NFL table is tried first, then an override's own coordinates
+    (no need to geocode what's already been placed by hand), then Photon."""
     nfl_row = _nfl_row(observation, nfl_catalog)
     if nfl_row is not None:
         return nfl_row, (), ()
@@ -743,7 +898,10 @@ def _resolve(
         return row, (f"manual: {override.note}",), ()
     outcome = geocoder.geocode(observation.name, observation.city, observation.state)
     if outcome.result is None:
-        return None, (), outcome.candidates
+        reasons = list(outcome.notes)
+        if outcome.candidates:
+            reasons.append(f"rejected: {'; '.join(outcome.candidates)}")
+        return None, (), tuple(reasons) or ("no candidates found",)
     found = outcome.result
     row = _base_row(
         observation,
@@ -766,17 +924,37 @@ def build_table(
     geocoder: Geocoder,
     refresh: bool = False,
 ) -> BuildResult:
-    """The table for `harvested` venues. Existing rows are kept as they are (unless
-    `refresh`), so a rerun only adds what's new; overrides are applied to every row."""
+    """The table for `harvested` venues. A row already in the table is kept as it is
+    (unless `refresh`), so a rerun only adds what's new, and it is never dropped by a
+    rerun that can't improve on it: if `refresh` can't place a venue again, the old row
+    stays and the venue is reported. Overrides are applied to every row; a row that
+    would be unreadable (a blank name, coordinates outside its state) is refused and
+    reported instead of written."""
     overrides = overrides or {}
     previous = {row.id: row for row in existing}
     report = Report()
     rows: dict[str, VenueRow] = {}
+    used: set[str] = set()
 
-    def settle(row: VenueRow, notes: tuple[str, ...] = ()) -> None:
-        """Apply the venue's override, then file the row as added, changed or kept."""
+    def unplace(venue_id: str, description: str, reasons: tuple[str, ...]) -> None:
+        old = previous.get(venue_id)
+        if old is not None:
+            rows[venue_id] = old
+            report.kept += 1
+            reasons = (*reasons, "kept the row already in the table")
+        report.needs_manual.append(Unplaced(venue_id, description, reasons))
+
+    def settle(row: VenueRow, notes: tuple[str, ...], description: str) -> None:
+        """Apply the venue's override, check the row, then file it as added/changed/kept."""
         override = overrides.get(row.id)
-        final = _apply_override(row, override) if override is not None else row
+        final = row
+        if override is not None:
+            used.add(row.id)
+            final = _apply_override(row, override)
+        problems = row_problems(final)
+        if problems:
+            unplace(row.id, description, tuple(f"row refused: {problem}" for problem in problems))
+            return
         old = previous.get(row.id)
         if old is None:
             report.added.append((final, notes))
@@ -789,18 +967,20 @@ def build_table(
     for venue_id in sorted(harvested.venues, key=id_order):
         observation = harvested.venues[venue_id]
         override = overrides.get(venue_id)
+        description = observation.describe()
         if override is not None and override.exclude:
+            used.add(venue_id)
             report.excluded.append(f"{venue_id} {observation.name}: {override.note}")
+        elif venue_id in previous and not refresh:
+            settle(previous[venue_id], (), description)
         elif is_confirmed_international(observation.address):
             report.international.append(f"{venue_id} {observation.name} ({observation.country})")
-        elif venue_id in previous and not refresh:
-            settle(previous[venue_id])
         else:
-            row, notes, rejected = _resolve(observation, override, nfl_catalog, geocoder)
+            row, notes, reasons = _resolve(observation, override, nfl_catalog, geocoder)
             if row is None:
-                report.needs_manual.append((observation, rejected))
+                unplace(venue_id, description, reasons)
             else:
-                settle(row, notes)
+                settle(row, notes, description)
 
     # Rows already in the table for venues the harvest didn't show (one added by hand, or
     # one that simply wasn't hosted this time): keep them, still subject to overrides.
@@ -809,9 +989,10 @@ def build_table(
             continue
         override = overrides.get(venue_id)
         if override is not None and override.exclude:
+            used.add(venue_id)
             report.excluded.append(f"{venue_id} {row.name}: {override.note}")
         else:
-            settle(row)
+            settle(row, (), f"{row.name}, {row.city}, {row.state}")
 
     # An override for a venue in neither place can supply a whole row.
     for venue_id, override in overrides.items():
@@ -819,10 +1000,18 @@ def build_table(
             continue
         new_row = _row_from_override(venue_id, override)
         if new_row is not None:
-            settle(new_row, (f"manual: {override.note}",))
+            settle(new_row, (f"manual: {override.note}",), f"{new_row.name} (override only)")
 
+    report.unused_overrides = [
+        f"{venue_id}: {overrides[venue_id].note}"
+        for venue_id in sorted(set(overrides) - used, key=id_order)
+    ]
+    report.removed = sorted(
+        (row for venue_id, row in previous.items() if venue_id not in rows),
+        key=lambda row: id_order(row.id),
+    )
     report.coverage_gaps = coverage_gaps(harvested, rows)
-    return BuildResult(sorted(rows.values(), key=lambda r: id_order(r.id)), report)
+    return BuildResult(sorted(rows.values(), key=lambda row: id_order(row.id)), report)
 
 
 def coverage_gaps(harvested: Harvest, rows: Mapping[str, VenueRow]) -> list[str]:
@@ -844,14 +1033,15 @@ def coverage_gaps(harvested: Harvest, rows: Mapping[str, VenueRow]) -> list[str]
 
 def format_report(result: BuildResult, *, venues_seen: int) -> str:
     """The reviewer's report: what's new (with a map link to check each against), what
-    changed, and what needs a human."""
+    changed or was removed, and what needs a human."""
     report = result.report
     lines = [
         f"{venues_seen} venue(s) seen, {len(result.rows)} in the table "
-        f"({report.kept} kept, {len(report.added)} added, {len(report.changed)} changed).",
+        f"({report.kept} kept, {len(report.added)} added, {len(report.changed)} changed, "
+        f"{len(report.removed)} removed).",
     ]
     if report.added:
-        lines.append("\nAdded - check each against the map link:")
+        lines.append("\nAdded - check each against its map link (if it has one):")
         for row, notes in report.added:
             detail = f" [{'; '.join(notes)}]" if notes else ""
             lines.append(
@@ -862,15 +1052,18 @@ def format_report(result: BuildResult, *, venues_seen: int) -> str:
     if report.changed:
         lines.append("\nChanged:")
         for old, new in report.changed:
-            lines.append(f"  {old.id:>6} {old.name}: {_row_summary(old)} -> {_row_summary(new)}")
+            lines.append(f"  {old.id:>6} {old.name}: {_describe_change(old, new)}")
+    if report.removed:
+        lines.append("\nRemoved from the table:")
+        for row in report.removed:
+            lines.append(f"  {row.id:>6} {row.name}, {row.city}, {row.state}")
     if report.needs_manual:
-        lines.append("\nNeeds manual coordinates (add to the overrides file):")
-        for observation, candidates in report.needs_manual:
-            seen = "; ".join(candidates) if candidates else "no candidates"
-            lines.append(
-                f"  {observation.venue_id:>6} {observation.name}, {observation.city}, "
-                f"{observation.state} ({observation.games} game(s)) - rejected: {seen}"
-            )
+        lines.append("\nNeeds a person (supply or fix the row in the overrides file):")
+        for entry in report.needs_manual:
+            lines.append(f"  {entry.venue_id:>6} {entry.description} - {'; '.join(entry.reasons)}")
+    if report.unused_overrides:
+        lines.append("\nOverrides that matched no venue (a mistyped id, or gone stale?):")
+        lines.extend(f"  {entry}" for entry in report.unused_overrides)
     if report.coverage_gaps:
         lines.append("\nTeams with no home venue in the table:")
         lines.extend(f"  {gap}" for gap in report.coverage_gaps)
@@ -882,6 +1075,11 @@ def format_report(result: BuildResult, *, venues_seen: int) -> str:
     return "\n".join(lines)
 
 
-def _row_summary(row: VenueRow) -> str:
-    covered = "covered" if row.is_covered else "open"
-    return f"{row.latitude:.5f},{row.longitude:.5f} {covered} {row.source}"
+def _describe_change(old: VenueRow, new: VenueRow) -> str:
+    """The fields that differ between two rows, so a change to the name or aliases isn't
+    invisible in the report. `repr` keeps API-supplied text from smuggling in newlines."""
+    return "; ".join(
+        f"{f.name} {getattr(old, f.name)!r} -> {getattr(new, f.name)!r}"
+        for f in fields(VenueRow)
+        if getattr(old, f.name) != getattr(new, f.name)
+    )

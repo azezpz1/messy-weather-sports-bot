@@ -1,5 +1,6 @@
 import datetime as dt
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import httpx
@@ -15,7 +16,6 @@ from messy_weather_sports_bot.venue_generation import (
     JsonCache,
     PhotonGeocoder,
     RateLimiter,
-    VenueObservation,
     build_table,
     format_report,
     observe_scoreboard,
@@ -23,7 +23,7 @@ from messy_weather_sports_bot.venue_generation import (
     parse_photon_feature,
     season_ranges,
 )
-from messy_weather_sports_bot.venue_table import VenueRow, dump_table
+from messy_weather_sports_bot.venue_table import VenueRow, dump_table, parse_table
 from messy_weather_sports_bot.venues import StadiumInfo, VenueCatalog
 
 # --------------------------------------------------------------------- fixtures
@@ -126,6 +126,12 @@ class FakeGeocoder:
 EMPTY_NFL = VenueCatalog([])
 
 
+def old_park_row(**changes) -> VenueRow:
+    """A row already in the table: Old Park, in Georgia (inside the state's box)."""
+    row = VenueRow("1", "Old Park", 33.95, -83.37, False, "Athens", "GA", "stadium", "photon:W5")
+    return replace(row, **changes)
+
+
 def _table(harvested: Harvest, geocoder: FakeGeocoder, **kwargs):
     kwargs.setdefault("nfl_catalog", EMPTY_NFL)
     return build_table(harvested, geocoder=geocoder, **kwargs)
@@ -142,7 +148,7 @@ def test_observing_a_scoreboard_counts_each_venues_games() -> None:
     )
 
     old_park, new_dome = harvested.venues["1"], harvested.venues["2"]
-    assert (old_park.games, old_park.neutral_games, old_park.indoor) == (2, 1, False)
+    assert (old_park.games, old_park.indoor) == (2, False)
     assert (new_dome.games, new_dome.indoor, new_dome.state) == (1, True, "TX")
     assert harvested.events == 3
 
@@ -415,7 +421,7 @@ def test_an_unknown_state_code_is_reported_without_a_request() -> None:
     outcome = _geocoder().geocode("Old Park", "Athens", "ZZ")
 
     assert outcome.result is None
-    assert "ZZ" in outcome.candidates[0]
+    assert "ZZ" in outcome.notes[0]
 
 
 @respx.mock
@@ -532,7 +538,16 @@ def test_a_malformed_overrides_file_is_rejected(text: str, message: str) -> None
         ({"note": "x", "colour": "red"}, "unknown fields"),
         ({"note": "x", "latitude": 1.0}, "latitude and longitude together"),
         ({"note": "x", "latitude": "1", "longitude": 2}, "'latitude' must be a number"),
-        ({"note": "x", "aliases": "a"}, "'aliases' must be a list of strings"),
+        ({"note": "x", "aliases": "a"}, "'aliases' must be a list of non-blank strings"),
+        ({"note": "x", "aliases": ["ok", " "]}, "'aliases' must be a list of non-blank strings"),
+        ({"note": "x", "exclude": "yes"}, "'exclude' must be true or false"),
+        ({"note": "x", "is_covered": 1}, "'is_covered' must be true or false"),
+        ({"note": "x", "name": " "}, "'name' must be a non-blank string"),
+        ({"note": "x", "city": 3}, "'city' must be a non-blank string"),
+        ({"note": "x", "state": "ZZ"}, "unknown state code"),
+        ({"note": "x", "latitude": 91, "longitude": 0}, "'latitude' out of range"),
+        ({"note": "x", "latitude": 0, "longitude": -181}, "'longitude' out of range"),
+        ({"note": "x", "latitude": True, "longitude": 0}, "'latitude' must be a number"),
         ("x", "must be an object"),
     ],
 )
@@ -545,7 +560,8 @@ def test_a_malformed_override_is_rejected_naming_the_venue(override: object, mes
 
 
 def test_a_new_venue_is_geocoded_and_seeded_covered_from_espn_indoor() -> None:
-    geocoder = FakeGeocoder({"New Dome": GeocodeOutcome(geocode_of(name="New Dome", osm_id=9))})
+    dallas = geocode_of(name="New Dome", osm_id=9, latitude=32.78, longitude=-96.8)
+    geocoder = FakeGeocoder({"New Dome": GeocodeOutcome(dallas)})
     harvested = harvest_of(cfb_event("2", "New Dome", "Dallas", "TX", indoor=True))
 
     result = _table(harvested, geocoder)
@@ -591,7 +607,7 @@ def test_a_venue_that_is_an_nfl_stadium_copies_its_coordinates_and_roof() -> Non
 
 
 def test_an_nfl_venue_that_espn_calls_indoor_is_covered_even_if_the_nfl_table_says_open() -> None:
-    nfl = VenueCatalog([StadiumInfo("Old Park", 40.0, -80.0, False, venue_id="1")])
+    nfl = VenueCatalog([StadiumInfo("Old Park", 33.95, -83.37, False, venue_id="1")])
 
     (row,) = _table(harvest_of(cfb_event("1", indoor=True)), FakeGeocoder(), nfl_catalog=nfl).rows
 
@@ -628,14 +644,14 @@ def test_a_venue_that_cannot_be_placed_is_reported_not_guessed() -> None:
     result = _table(harvest_of(cfb_event("4", "Odd Field")), geocoder)
 
     assert result.rows == []
-    ((observation, rejected),) = result.report.needs_manual
-    assert observation.venue_id == "4"
-    assert rejected == ("Odd Field (leisure=pitch, Elsewhere, Ohio)",)
+    (unplaced,) = result.report.needs_manual
+    assert unplaced.venue_id == "4"
+    assert unplaced.reasons == ("rejected: Odd Field (leisure=pitch, Elsewhere, Ohio)",)
     assert result.report.needs_attention
 
 
 def test_existing_rows_are_kept_without_geocoding_again() -> None:
-    existing = [VenueRow("1", "Old Park", 1.0, 2.0, False, "Athens", "GA", "stadium", "photon:W5")]
+    existing = [old_park_row()]
     geocoder = FakeGeocoder()
 
     result = _table(harvest_of(cfb_event("1")), geocoder, existing=existing)
@@ -646,17 +662,18 @@ def test_existing_rows_are_kept_without_geocoding_again() -> None:
 
 
 def test_refresh_recomputes_rows_already_in_the_table() -> None:
-    existing = [VenueRow("1", "Old Park", 1.0, 2.0, False, "Athens", "GA", "stadium", "photon:W5")]
-    geocoder = FakeGeocoder({"Old Park": GeocodeOutcome(geocode_of(latitude=3.0, longitude=4.0))})
+    existing = [old_park_row()]
+    moved = geocode_of(latitude=33.96, longitude=-83.38)
+    geocoder = FakeGeocoder({"Old Park": GeocodeOutcome(moved)})
 
     result = _table(harvest_of(cfb_event("1")), geocoder, existing=existing, refresh=True)
 
-    assert (result.rows[0].latitude, result.rows[0].longitude) == (3.0, 4.0)
-    assert [(old.latitude, new.latitude) for old, new in result.report.changed] == [(1.0, 3.0)]
+    assert (result.rows[0].latitude, result.rows[0].longitude) == (33.96, -83.38)
+    assert [(old.latitude, new.latitude) for old, new in result.report.changed] == [(33.95, 33.96)]
 
 
 def test_a_row_not_hosted_this_time_stays_in_the_table() -> None:
-    existing = [VenueRow("9", "Quiet Field", 1.0, 2.0, False, "Ames", "IA", "manual", "manual")]
+    existing = [VenueRow("9", "Quiet Field", 42.0, -93.6, False, "Ames", "IA", "manual", "manual")]
 
     result = _table(
         harvest_of(cfb_event("1")),
@@ -669,7 +686,7 @@ def test_a_row_not_hosted_this_time_stays_in_the_table() -> None:
 
 def test_an_override_with_coordinates_replaces_a_geocode_and_skips_the_lookup() -> None:
     overrides = _overrides(
-        {"1": {"note": "OSM has the old site", "latitude": 10.123456, "longitude": -20.5}}
+        {"1": {"note": "OSM has the old site", "latitude": 33.123456, "longitude": -83.5}}
     )
     geocoder = FakeGeocoder()
 
@@ -677,8 +694,8 @@ def test_an_override_with_coordinates_replaces_a_geocode_and_skips_the_lookup() 
 
     (row,) = result.rows
     assert (row.latitude, row.longitude, row.precision, row.source) == (
-        10.12346,
-        -20.5,
+        33.12346,
+        -83.5,
         "manual",
         "manual",
     )
@@ -699,7 +716,7 @@ def test_an_override_can_force_a_retractable_roof_covered_and_add_aliases() -> N
 
 
 def test_an_override_applies_to_a_row_that_is_already_in_the_table() -> None:
-    existing = [VenueRow("1", "Old Park", 1.0, 2.0, False, "Athens", "GA", "stadium", "photon:W5")]
+    existing = [old_park_row()]
     overrides = _overrides({"1": {"note": "roof", "is_covered": True}})
 
     result = _table(
@@ -789,10 +806,11 @@ def test_the_table_is_identical_whatever_order_the_games_arrive_in() -> None:
         cfb_event("4", "A Field", "Citya", "OH"),
         cfb_event("200", "B Field", "Cityb", "FL"),
     ]
+    places = {"A Field": (40.0, -83.0), "B Field": (28.0, -82.0), "C Field": (31.0, -97.0)}
     geocoder = FakeGeocoder(
         {
-            n: GeocodeOutcome(geocode_of(name=n, osm_id=i))
-            for i, n in enumerate(["A Field", "B Field", "C Field"])
+            name: GeocodeOutcome(geocode_of(name=name, osm_id=i, latitude=lat, longitude=lon))
+            for i, (name, (lat, lon)) in enumerate(places.items())
         }
     )
 
@@ -825,13 +843,13 @@ def test_the_report_lists_added_rows_with_a_map_link_and_what_needs_a_human() ->
     assert "3 venue(s) seen, 1 in the table" in text
     assert "https://www.openstreetmap.org/way/77" in text
     assert "city differs: OSM says Bogart" in text
-    assert "Needs manual coordinates" in text
+    assert "Needs a person" in text
     assert "Odd Field (leisure=pitch, Elsewhere, Ohio)" in text
     assert "Skipped as international: 7 Aviva Stadium (Ireland)" in text
 
 
 def test_a_venue_observation_exposes_its_address_for_the_international_check() -> None:
-    observation = VenueObservation("1", city="Athens", state="GA", country="USA")
+    observation = harvest_of(cfb_event("1")).venues["1"]
 
     assert observation.address == {"city": "Athens", "state": "GA", "country": "USA"}
 
@@ -931,3 +949,442 @@ def test_a_city_matches_when_one_names_words_are_within_the_others() -> None:
 
     assert outcome.result is not None
     assert outcome.notes == ()  # a partial name is only accepted in the right city
+
+
+def test_a_non_finite_coordinate_in_the_overrides_file_is_rejected() -> None:
+    text = '{"schema_version": 1, "venues": {"7": {"note": "x", "latitude": NaN, "longitude": 0}}}'
+
+    with pytest.raises(ValueError, match="'latitude' must be a number"):
+        parse_overrides(text)
+
+
+# ----------------------------------------------------------- applying overrides
+
+
+def test_an_override_with_nothing_to_change_leaves_the_row_alone() -> None:
+    row = old_park_row()
+
+    assert gen._apply_override(row, gen.Override(note="just a note")) is row
+
+
+def test_an_override_changes_only_the_fields_it_names() -> None:
+    row = old_park_row(aliases=("The Old",))
+
+    renamed = gen._apply_override(row, gen.Override(note="x", name="New Park", state="SC"))
+    recoated = gen._apply_override(row, gen.Override(note="x", is_covered=True, city="Bogart"))
+
+    assert renamed == replace(row, name="New Park", state="SC")
+    assert recoated == replace(row, is_covered=True, city="Bogart")
+
+
+def test_override_coordinates_make_the_row_manual_and_are_rounded() -> None:
+    row = old_park_row()
+    override = gen.Override(note="x", latitude=33.1234567, longitude=-83.7654321)
+
+    moved = gen._apply_override(row, override)
+
+    assert (moved.latitude, moved.longitude) == (33.12346, -83.76543)
+    assert (moved.precision, moved.source) == ("manual", "manual")
+
+
+def test_a_whole_row_from_an_override_has_every_field_from_the_override() -> None:
+    override = gen.Override(
+        note="x",
+        name="Brand New Stadium",
+        aliases=("The New",),
+        latitude=40.8,
+        longitude=-96.7,
+        is_covered=True,
+        city="Lincoln",
+        state="NE",
+    )
+
+    assert gen._row_from_override("8", override) == VenueRow(
+        "8",
+        "Brand New Stadium",
+        40.8,
+        -96.7,
+        True,
+        "Lincoln",
+        "NE",
+        "manual",
+        "manual",
+        aliases=("The New",),
+    )
+
+
+@pytest.mark.parametrize(
+    "missing", ["name", "latitude", "longitude", "is_covered", "city", "state"]
+)
+def test_an_override_missing_any_field_is_not_enough_for_a_whole_row(missing: str) -> None:
+    complete = gen.Override(
+        note="x",
+        name="Brand New Stadium",
+        latitude=40.8,
+        longitude=-96.7,
+        is_covered=False,
+        city="Lincoln",
+        state="NE",
+    )
+
+    assert gen._row_from_override("8", complete) is not None
+    assert gen._row_from_override("8", replace(complete, **{missing: None})) is None
+
+
+def test_an_indoor_venue_given_coordinates_by_an_override_is_covered() -> None:
+    overrides = _overrides({"1": {"note": "OSM lacks it", "latitude": 33.9, "longitude": -83.3}})
+
+    (row,) = _table(
+        harvest_of(cfb_event("1", indoor=True)), FakeGeocoder(), overrides=overrides
+    ).rows
+
+    assert (row.is_covered, row.source) == (True, "manual")
+
+
+# ------------------------------------------------- rows that must not be written
+
+
+def test_a_sound_row_has_no_problems() -> None:
+    assert gen.row_problems(old_park_row()) == []
+
+
+@pytest.mark.parametrize(
+    ("changes", "problem"),
+    [
+        ({"name": " "}, "name is blank"),
+        ({"city": ""}, "city is blank"),
+        ({"state": ""}, "state is blank"),
+        ({"state": "ZZ"}, "unknown state 'ZZ'"),
+        ({"longitude": 83.37}, "coordinates 33.95000, 83.37000 are outside GA"),
+        ({"latitude": 0.0, "longitude": 0.0}, "outside GA"),
+    ],
+)
+def test_row_problems_names_what_is_wrong(changes: dict, problem: str) -> None:
+    assert any(problem in found for found in gen.row_problems(old_park_row(**changes)))
+
+
+def test_a_blank_state_is_reported_as_blank_not_also_as_unknown() -> None:
+    assert gen.row_problems(old_park_row(state="")) == ["state is blank"]
+
+
+def test_a_venue_whose_name_espn_left_blank_is_refused_not_written_unreadable() -> None:
+    geocoder = FakeGeocoder({"": GeocodeOutcome(geocode_of())})
+
+    result = _table(harvest_of(cfb_event("1", name="")), geocoder)
+
+    assert result.rows == []
+    (unplaced,) = result.report.needs_manual
+    assert unplaced.reasons == ("row refused: name is blank",)
+    assert result.report.needs_attention
+
+
+def test_an_override_can_supply_the_name_espn_left_blank() -> None:
+    overrides = _overrides(
+        {"1": {"note": "no name", "name": "Old Park", "latitude": 33.9, "longitude": -83.3}}
+    )
+
+    result = _table(harvest_of(cfb_event("1", name="")), FakeGeocoder(), overrides=overrides)
+
+    assert [(row.id, row.name) for row in result.rows] == [("1", "Old Park")]
+    assert not result.report.needs_attention
+    parse_table(dump_table(result.rows))  # and it reads back
+
+
+def test_a_venue_whose_state_espn_left_blank_is_refused() -> None:
+    overrides = _overrides({"1": {"note": "x", "latitude": 33.9, "longitude": -83.3}})
+
+    result = _table(harvest_of(cfb_event("1", state="")), FakeGeocoder(), overrides=overrides)
+
+    assert result.rows == []
+    assert result.report.needs_manual[0].reasons == ("row refused: state is blank",)
+
+
+def test_an_override_with_coordinates_outside_the_state_is_refused() -> None:
+    # A dropped minus sign puts the stadium in China.
+    overrides = _overrides({"1": {"note": "typo", "latitude": 33.9, "longitude": 83.3}})
+
+    result = _table(harvest_of(cfb_event("1")), FakeGeocoder(), overrides=overrides)
+
+    assert result.rows == []
+    (unplaced,) = result.report.needs_manual
+    assert "outside GA" in unplaced.reasons[0]
+
+
+def test_a_refused_override_leaves_the_existing_row_in_place() -> None:
+    existing = [old_park_row()]
+    overrides = _overrides({"1": {"note": "typo", "latitude": 33.9, "longitude": 83.3}})
+
+    result = _table(
+        harvest_of(cfb_event("1")), FakeGeocoder(), existing=existing, overrides=overrides
+    )
+
+    assert result.rows == existing
+    assert result.report.changed == []
+    assert result.report.kept == 1
+    assert "kept the row already in the table" in result.report.needs_manual[0].reasons
+    assert result.report.needs_attention
+
+
+# --------------------------------------------------------- rows are not lost
+
+
+def test_a_refresh_that_cannot_place_a_venue_keeps_its_old_row_and_says_so() -> None:
+    existing = [old_park_row()]
+
+    result = _table(harvest_of(cfb_event("1")), FakeGeocoder(), existing=existing, refresh=True)
+
+    assert result.rows == existing
+    (unplaced,) = result.report.needs_manual
+    assert unplaced.reasons == ("rejected: nothing nearby", "kept the row already in the table")
+    assert result.report.removed == []
+    assert result.report.needs_attention
+
+
+def test_every_row_in_the_table_is_counted_once_as_kept_added_or_changed() -> None:
+    existing = [old_park_row(), old_park_row(id="2", name="Gone Field")]
+    geocoder = FakeGeocoder({"New Dome": GeocodeOutcome(geocode_of(name="New Dome"))})
+    harvested = harvest_of(cfb_event("1"), cfb_event("3", "New Dome"), cfb_event("2", "Gone Field"))
+    overrides = _overrides({"2": {"note": "roof", "is_covered": True}})
+
+    result = _table(harvested, geocoder, existing=existing, overrides=overrides, refresh=False)
+
+    report = result.report
+    assert len(result.rows) == report.kept + len(report.added) + len(report.changed)
+
+
+def test_a_venue_that_turns_out_international_is_not_dropped_without_refresh() -> None:
+    existing = [old_park_row()]
+    harvested = harvest_of(cfb_event("1", country="Ireland"))
+
+    result = _table(harvested, FakeGeocoder(), existing=existing)
+
+    assert result.rows == existing
+    assert result.report.removed == []
+
+
+def test_a_refresh_that_finds_a_venue_international_removes_and_reports_it() -> None:
+    existing = [old_park_row()]
+    harvested = harvest_of(cfb_event("1", country="Ireland"))
+
+    result = _table(harvested, FakeGeocoder(), existing=existing, refresh=True)
+
+    assert result.rows == []
+    assert result.report.removed == existing
+    assert result.report.international == ["1 Old Park (Ireland)"]
+
+
+def test_an_exclusion_removes_a_row_already_in_the_table_and_reports_it() -> None:
+    existing = [old_park_row()]
+    overrides = _overrides({"1": {"note": "not a game venue", "exclude": True}})
+
+    result = _table(
+        harvest_of(cfb_event("1")), FakeGeocoder(), existing=existing, overrides=overrides
+    )
+
+    assert result.rows == []
+    assert result.report.removed == existing
+    assert result.report.excluded == ["1 Old Park: not a game venue"]
+
+
+def test_international_is_decided_by_most_of_a_venues_games_not_the_last_one() -> None:
+    mostly_abroad = harvest_of(
+        cfb_event("1", country="Ireland"),
+        cfb_event("1", country="Ireland"),
+        cfb_event("1", country="USA"),
+    )
+    mostly_home = harvest_of(
+        cfb_event("1", country="Ireland"), cfb_event("1"), cfb_event("1"), cfb_event("1")
+    )
+    geocoder = FakeGeocoder({"Old Park": GeocodeOutcome(geocode_of())})
+
+    assert _table(mostly_abroad, geocoder).report.international == ["1 Old Park (Ireland)"]
+    assert [row.id for row in _table(mostly_home, geocoder).rows] == ["1"]
+
+
+def test_a_game_that_omits_a_field_cannot_blank_it_out() -> None:
+    harvested = harvest_of(cfb_event("1", "Old Park"), cfb_event("1", "", city="", state=""))
+
+    venue = harvested.venues["1"]
+    assert (venue.name, venue.city, venue.state, venue.games) == ("Old Park", "Athens", "GA", 2)
+
+
+def test_a_venue_with_no_name_in_any_game_describes_itself_as_unnamed() -> None:
+    harvested = harvest_of(cfb_event("1", "", city="", state=""))
+
+    assert harvested.venues["1"].describe() == "(unnamed), ?, ? (1 game(s))"
+
+
+# ------------------------------------------------------------ unused overrides
+
+
+def test_an_override_that_matches_no_venue_is_reported_and_needs_attention() -> None:
+    overrides = _overrides({"99": {"note": "stale", "latitude": 33.9, "longitude": -83.3}})
+
+    result = _table(harvest_of(cfb_event("1")), FakeGeocoder(), overrides=overrides)
+
+    assert result.report.unused_overrides == ["99: stale"]
+    assert result.report.needs_attention
+
+
+def test_an_exclusion_that_matches_nothing_is_unused_too() -> None:
+    overrides = _overrides({"99": {"note": "typo in the id", "exclude": True}})
+
+    result = _table(harvest_of(), FakeGeocoder(), overrides=overrides)
+
+    assert result.report.unused_overrides == ["99: typo in the id"]
+
+
+def test_an_override_for_a_skipped_international_venue_is_unused() -> None:
+    overrides = _overrides({"1": {"note": "x", "latitude": 33.9, "longitude": -83.3}})
+
+    result = _table(
+        harvest_of(cfb_event("1", country="Ireland")), FakeGeocoder(), overrides=overrides
+    )
+
+    assert result.report.unused_overrides == ["1: x"]
+
+
+def test_overrides_that_were_applied_are_not_reported_as_unused() -> None:
+    overrides = _overrides(
+        {
+            "1": {"note": "coordinates", "latitude": 33.9, "longitude": -83.3},
+            "2": {"note": "excluded", "exclude": True},
+            "3": {"note": "roof, on an existing row", "is_covered": True},
+            "8": {
+                "note": "whole row",
+                "name": "Brand New Stadium",
+                "latitude": 40.8,
+                "longitude": -96.7,
+                "is_covered": False,
+                "city": "Lincoln",
+                "state": "NE",
+            },
+        }
+    )
+    existing = [old_park_row(id="3", name="Third Field")]
+
+    result = _table(
+        harvest_of(cfb_event("1"), cfb_event("2", "Two Field"), cfb_event("3", "Third Field")),
+        FakeGeocoder(),
+        existing=existing,
+        overrides=overrides,
+    )
+
+    assert result.report.unused_overrides == []
+    assert not result.report.needs_attention
+
+
+# --------------------------------------------------------------- report details
+
+
+def test_a_change_lists_the_fields_that_differ() -> None:
+    old = old_park_row()
+    new = replace(old, name="New Park", aliases=("Old Park",), is_covered=True)
+
+    assert gen._describe_change(old, new) == (
+        "name 'Old Park' -> 'New Park'; is_covered False -> True; aliases () -> ('Old Park',)"
+    )
+
+
+def test_a_change_never_prints_a_raw_newline_from_an_api_name() -> None:
+    old = old_park_row()
+
+    text = gen._describe_change(old, replace(old, name="Bad\nName"))
+
+    assert "\n" not in text
+    assert "Bad\\nName" in text
+
+
+def test_the_report_lists_removed_rows_and_unused_overrides() -> None:
+    existing = [old_park_row()]
+    overrides = _overrides(
+        {"1": {"note": "gone", "exclude": True}, "99": {"note": "stale", "exclude": True}}
+    )
+    harvested = harvest_of(cfb_event("1"))
+
+    result = _table(harvested, FakeGeocoder(), existing=existing, overrides=overrides)
+    text = format_report(result, venues_seen=len(harvested.venues))
+
+    assert "1 removed" in text
+    assert "Removed from the table:" in text
+    assert "Overrides that matched no venue" in text
+    assert "99: stale" in text
+
+
+# ------------------------------------------------------- geocoder edge cases
+
+
+@respx.mock
+def test_a_partial_name_found_only_in_the_wrong_city_is_rejected() -> None:
+    feature = photon_feature("Memorial Stadium", city="Urbana", state="Illinois")
+    respx.get(gen.PHOTON_URL).mock(return_value=httpx.Response(200, json={"features": [feature]}))
+
+    outcome = _geocoder().geocode("Gies Memorial Stadium", "Champaign", "IL")
+
+    assert outcome.result is None
+    assert outcome.candidates == ("Memorial Stadium (leisure=stadium, Urbana, Illinois)",)
+
+
+@respx.mock
+def test_a_blank_espn_city_never_vouches_for_a_partial_name() -> None:
+    feature = photon_feature("Memorial Stadium", city="Champaign", state="Illinois")
+    respx.get(gen.PHOTON_URL).mock(return_value=httpx.Response(200, json={"features": [feature]}))
+
+    assert _geocoder().geocode("Gies Memorial Stadium", "", "IL").result is None
+
+
+@respx.mock
+def test_a_blank_espn_name_is_reported_without_asking_photon() -> None:
+    outcome = _geocoder().geocode("  ", "Athens", "GA")  # respx rejects any request
+
+    assert outcome.result is None
+    assert outcome.notes == ("ESPN gave no venue name",)
+
+
+@respx.mock
+def test_a_city_matches_when_espn_gives_the_longer_name() -> None:
+    feature = photon_feature("Fred C. Yager Stadium", state="Ohio", city="Oxford")
+    respx.get(gen.PHOTON_URL).mock(return_value=httpx.Response(200, json={"features": [feature]}))
+
+    outcome = _geocoder().geocode("Yager Stadium", "Oxford Township", "OH")
+
+    assert outcome.result is not None
+    assert outcome.notes == ()
+
+
+def test_a_name_with_no_letters_or_digits_matches_nothing() -> None:
+    candidate = geocode_of(name="---")
+
+    assert gen._judge(candidate, "---", "Athens", "Georgia", gen.STADIUM_CLASSES) is None
+    assert gen._judge(geocode_of(), "---", "Athens", "Georgia", gen.STADIUM_CLASSES) is None
+
+
+@respx.mock
+def test_a_right_city_match_from_the_wider_search_beats_a_wrong_city_one_from_the_first() -> None:
+    wrong_town = photon_feature("Memorial Stadium", city="Bloomington", osm_id=1, state="Illinois")
+    right_town = photon_feature(
+        "Gies Memorial Stadium", city="Champaign", osm_id=2, state="Illinois", value="pitch"
+    )
+    respx.get(gen.PHOTON_URL).mock(
+        side_effect=[
+            httpx.Response(200, json={"features": [wrong_town]}),  # the stadium-tagged search
+            httpx.Response(200, json={"features": [right_town]}),  # the wider search
+        ]
+    )
+
+    outcome = _geocoder().geocode("Memorial Stadium", "Champaign", "IL")
+
+    assert outcome.result is not None
+    assert outcome.result.osm_id == 2
+    assert outcome.notes == ("mapped as leisure=pitch, not a stadium",)
+
+
+@respx.mock
+def test_the_first_search_is_enough_when_it_finds_the_right_city() -> None:
+    route = respx.get(gen.PHOTON_URL).mock(
+        return_value=httpx.Response(200, json={"features": [photon_feature("Old Park")]})
+    )
+
+    _geocoder().geocode("Old Park", "Athens", "GA")
+
+    assert route.call_count == 1

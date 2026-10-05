@@ -9,8 +9,6 @@ NEW_DOME = StadiumInfo("New Dome", 41.0, -81.0, is_covered=True, venue_id="2")
 # Lists the same building as OLD_PARK, as two teams that share a stadium do.
 OLD_PARK_TWIN = StadiumInfo("Old Park", 40.0, -80.0, is_covered=False, venue_id="1")
 NO_ID = StadiumInfo("Unnumbered Field", 42.0, -82.0, is_covered=False)
-# Same name as OLD_PARK, but in another town - as with the many "Memorial Stadium"s.
-OLD_PARK_ELSEWHERE = StadiumInfo("Old Park", 35.0, -90.0, is_covered=False, venue_id="3")
 
 
 def test_a_venue_id_wins_over_a_conflicting_name() -> None:
@@ -46,36 +44,25 @@ def test_the_same_building_listed_twice_still_resolves_by_name() -> None:
     assert catalog.for_venue("", "Old Park") is OLD_PARK
 
 
-def test_a_name_shared_by_stadiums_in_different_places_matches_none_of_them() -> None:
-    catalog = VenueCatalog([OLD_PARK, OLD_PARK_ELSEWHERE])
+def test_an_id_only_catalog_ignores_names_and_aliases() -> None:
+    catalog = VenueCatalog([OLD_PARK, NEW_DOME], match_names=False)
 
+    assert catalog.for_venue("1", "") is OLD_PARK
     assert catalog.for_venue("", "Old Park") is None
-    assert catalog.for_venue("999", "Old Park") is None  # an unknown id doesn't break the tie
-
-
-def test_ids_still_pick_the_right_stadium_when_their_name_is_ambiguous() -> None:
-    catalog = VenueCatalog([OLD_PARK, OLD_PARK_ELSEWHERE])
-
-    assert catalog.for_venue("1", "Old Park") is OLD_PARK
-    assert catalog.for_venue("3", "Old Park") is OLD_PARK_ELSEWHERE
-
-
-def test_an_alias_shared_by_different_places_is_ambiguous_too() -> None:
-    renamed_elsewhere = StadiumInfo("Other Park", 35.0, -90.0, False, aliases=("The Old",))
-    catalog = VenueCatalog([OLD_PARK, renamed_elsewhere])
-
     assert catalog.for_venue("", "The Old") is None
-    assert catalog.for_venue("", "Other Park") is renamed_elsewhere
+    assert catalog.for_venue("999", "New Dome") is None  # an unknown id isn't rescued by a name
 
 
-def test_a_later_stadium_cannot_revive_an_ambiguous_name() -> None:
-    catalog = VenueCatalog([OLD_PARK, OLD_PARK_ELSEWHERE, OLD_PARK_TWIN])
+def test_an_id_only_catalog_keeps_the_first_stadium_for_a_shared_id() -> None:
+    first = StadiumInfo("First Name", 40.0, -80.0, is_covered=False, venue_id="1")
+    second = StadiumInfo("Second Name", 41.0, -81.0, is_covered=False, venue_id="1")
 
-    assert catalog.for_venue("", "Old Park") is None
+    assert VenueCatalog([first, second], match_names=False).for_venue("1", "") is first
 
 
-def test_an_ambiguous_name_with_an_unknown_id_is_reported_as_drift_not_guessed() -> None:
-    catalog = VenueCatalog([OLD_PARK, OLD_PARK_ELSEWHERE])
+def test_a_town_sharing_a_name_with_a_known_stadium_is_reported_as_drift_not_guessed() -> None:
+    # "Old Park" is also the name of a stadium elsewhere; an id-only catalog doesn't know id 77.
+    catalog = VenueCatalog([OLD_PARK], match_names=False)
 
     result = resolve_venue(catalog, "XYZ", {"fullName": "Old Park", "id": "77"}, venue_present=True)
 

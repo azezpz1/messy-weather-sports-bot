@@ -40,14 +40,15 @@ class VenueCatalog:
     a home team's own venue after ESPN renames it, as long as the id matches or the new
     name has been added as an alias.
 
-    An id is unique; if two stadiums share one, the first wins. A *name* can be shared:
-    two teams listing the same building (the NFL's LAC/LAR) are the same stadium, but
-    many towns have a "Memorial Stadium", so a name that belongs to stadiums in
-    different places matches none of them - a lookup by that name alone would be a guess
-    at which town's weather to report, and reporting it as unrecognized is safer.
-    `by_team` optionally maps a team abbreviation to its usual stadium, for the fallback
-    when ESPN omits a game's venue entirely; it is built into the catalog, so changing
-    the mapping later has no effect.
+    Where two stadiums share an id or a name (two teams listing the same building),
+    the one that comes first in `stadiums` wins. `by_team` optionally maps a team
+    abbreviation to its usual stadium, for the fallback when ESPN omits a game's venue
+    entirely; it is built into the catalog, so changing the mapping later has no effect.
+
+    `match_names=False` makes the catalog id-only, for a table too big to trust a name in:
+    many towns have a "Memorial Stadium", so a name-only match could report another
+    town's weather. An unknown id is then an unrecognized venue, which is reported
+    as drift instead.
     """
 
     def __init__(
@@ -55,17 +56,17 @@ class VenueCatalog:
         stadiums: Iterable[StadiumInfo],
         *,
         by_team: Mapping[str, StadiumInfo] | None = None,
+        match_names: bool = True,
     ) -> None:
         self._by_id: dict[str, StadiumInfo] = {}
-        self._by_name: dict[str, StadiumInfo | None] = {}
-        """None marks a name shared by stadiums in different places."""
+        self._by_name: dict[str, StadiumInfo] = {}
         for stadium in stadiums:
             if stadium.venue_id:
                 self._by_id.setdefault(stadium.venue_id, stadium)
-            for name in (stadium.name, *stadium.aliases):
-                known = self._by_name.setdefault(name, stadium)
-                if known is not None and _location(known) != _location(stadium):
-                    self._by_name[name] = None
+            if match_names:
+                self._by_name.setdefault(stadium.name, stadium)
+                for alias in stadium.aliases:
+                    self._by_name.setdefault(alias, stadium)
         self._by_team = dict(by_team or {})
 
     def for_team(self, team_abbreviation: str) -> StadiumInfo:
@@ -80,10 +81,6 @@ class VenueCatalog:
         if venue_name:
             return self._by_name.get(venue_name)
         return None
-
-
-def _location(stadium: StadiumInfo) -> tuple[float, float]:
-    return stadium.latitude, stadium.longitude
 
 
 def is_confirmed_international(venue_address: dict) -> bool:

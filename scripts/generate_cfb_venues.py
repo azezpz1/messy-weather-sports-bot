@@ -9,7 +9,9 @@ the table. Rows already in the table are kept, so a rerun only adds what's new; 
 venue comes with a map link to check it against.
 
 Exits 0 when every venue was placed, 2 when something needs a human (a venue it
-couldn't place, or an FBS team with no home field in the table), 1 on a network error.
+couldn't place, an override that matched nothing, or an FBS team with no home field in
+the table; the table is still written), 1 on an error (the network, an unreadable or
+malformed input file, a harvest that found no games), in which case nothing is written.
 Run it from a checkout with network access to ESPN and photon.komoot.io:
 
     uv run python scripts/generate_cfb_venues.py --cache .cache/venue_geocode.json
@@ -46,10 +48,24 @@ def _date_range(text: str) -> tuple[dt.date, dt.date]:
     return start, end
 
 
+def _fail(problem: object) -> int:
+    """Report an error and return the exit code for one. Control characters are escaped,
+    since the text can include something ESPN or a geocoder said."""
+    if isinstance(problem, BaseException):
+        problem = f"{type(problem).__name__}: {problem}"
+    text = "".join(char if char.isprintable() else repr(char)[1:-1] for char in str(problem))
+    print(f"error: {text}", file=sys.stderr)
+    return 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--overrides", type=Path, default=DEFAULT_OVERRIDES)
+    parser.add_argument(
+        "--overrides",
+        type=Path,
+        help="Hand-made corrections (default: scripts/data/cfb_venue_overrides.json).",
+    )
     parser.add_argument(
         "--range",
         dest="ranges",
@@ -70,10 +86,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     ranges = args.ranges or generation.season_ranges(dt.date.today())
-    existing = parse_table(args.output.read_text()) if args.output.exists() else []
-    overrides = (
-        generation.parse_overrides(args.overrides.read_text()) if args.overrides.exists() else {}
-    )
+    try:
+        existing = parse_table(args.output.read_text()) if args.output.exists() else []
+        overrides_path = args.overrides or DEFAULT_OVERRIDES
+        if args.overrides is None and not overrides_path.exists():
+            overrides = {}
+        else:
+            overrides = generation.parse_overrides(overrides_path.read_text())
+    except (OSError, ValueError) as exc:
+        return _fail(exc)
 
     try:
         # ESPN's edge refuses unfamiliar User-Agents, so its client keeps httpx's default;
@@ -85,9 +106,14 @@ def main(argv: list[str] | None = None) -> int:
             harvested = generation.harvest(espn_client, ranges)
             print(
                 f"Harvested {harvested.events} game(s) over {harvested.days} day(s): "
-                f"{len(harvested.venues)} venue(s), {len(harvested.teams)} team(s).",
+                f"{len(harvested.venues)} venue(s), {len(harvested.teams)} team(s); "
+                f"{harvested.events_without_venue_id} game(s) had no venue id.",
                 file=sys.stderr,
             )
+            if not harvested.events:
+                return _fail(
+                    "ESPN returned no games for the date range, so there is nothing to build"
+                )
             geocoder = generation.PhotonGeocoder(
                 geocode_client, cache=generation.JsonCache(args.cache)
             )
@@ -99,14 +125,19 @@ def main(argv: list[str] | None = None) -> int:
                 geocoder=geocoder,
                 refresh=args.refresh,
             )
-    except httpx.HTTPError as exc:
-        print(f"error: {type(exc).__name__}: {exc}", file=sys.stderr)
-        return 1
+    except (httpx.HTTPError, ValueError, OSError) as exc:
+        return _fail(exc)
 
     print(generation.format_report(result, venues_seen=len(harvested.venues)))
     if not args.dry_run:
-        args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(dump_table(result.rows))
+        text = dump_table(result.rows)
+        try:
+            # Never write a table the runtime couldn't read back.
+            parse_table(text)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(text)
+        except (OSError, ValueError) as exc:
+            return _fail(exc)
         print(f"\nWrote {len(result.rows)} venue(s) to {args.output}.")
     return 2 if result.report.needs_attention else 0
 

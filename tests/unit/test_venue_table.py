@@ -141,16 +141,22 @@ def test_an_integer_coordinate_is_accepted_as_a_float() -> None:
     assert (row.latitude, row.longitude) == (40.0, -80.0)
 
 
-def test_a_catalog_resolves_by_id_then_name_and_alias() -> None:
+def test_a_catalog_resolves_by_id_alone() -> None:
     catalog = catalog_from_rows([_row("101"), _row("102", name="New Dome", aliases=())])
 
     by_id = catalog.for_venue("102", "Whatever")
-    by_alias = catalog.for_venue("", "The Old")
     assert by_id is not None
     assert by_id.name == "New Dome"
-    assert by_alias is not None
-    assert by_alias.venue_id == "101"
     assert catalog.for_venue("999", "Nowhere") is None
+
+
+def test_a_catalog_does_not_match_a_name_or_alias_without_its_id() -> None:
+    # Many towns have a "Memorial Stadium": an unknown id is drift, not a guess at which one.
+    catalog = catalog_from_rows([_row("101")])
+
+    assert catalog.for_venue("", "Old Park") is None
+    assert catalog.for_venue("", "The Old") is None
+    assert catalog.for_venue("999", "Old Park") is None
 
 
 def test_a_college_catalog_never_guesses_a_stadium_from_the_home_team() -> None:

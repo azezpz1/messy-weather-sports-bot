@@ -12,7 +12,11 @@ from pathlib import Path
 import pytest
 
 from messy_weather_sports_bot.stadiums import NFL_CATALOG
-from messy_weather_sports_bot.venue_generation import US_STATES, parse_overrides
+from messy_weather_sports_bot.venue_generation import (
+    STATE_BOXES,
+    US_STATES,
+    parse_overrides,
+)
 from messy_weather_sports_bot.venue_table import (
     PRECISIONS,
     VenueRow,
@@ -29,63 +33,6 @@ OVERRIDES_PATH = REPO_ROOT / "scripts" / "data" / "cfb_venue_overrides.json"
 ROWS = load_packaged_table("cfb_venues.json")
 ROWS_BY_ID = {row.id: row for row in ROWS}
 ROW_PARAMS = [pytest.param(row, id=f"{row.id}-{row.name}") for row in ROWS]
-
-# (south, north, west, east), a little generous: the check is "this point is in that
-# state, not another one", which is what a wrong-city geocode would break.
-STATE_BOXES: dict[str, tuple[float, float, float, float]] = {
-    "AL": (30.1, 35.1, -88.6, -84.8),
-    "AK": (51.0, 71.5, -180.0, -129.9),
-    "AZ": (31.2, 37.1, -114.9, -109.0),
-    "AR": (33.0, 36.6, -94.7, -89.6),
-    "CA": (32.4, 42.1, -124.5, -114.1),
-    "CO": (36.9, 41.1, -109.1, -102.0),
-    "CT": (40.9, 42.1, -73.8, -71.7),
-    "DE": (38.4, 39.9, -75.8, -75.0),
-    "DC": (38.78, 39.0, -77.15, -76.9),
-    "FL": (24.4, 31.1, -87.7, -79.9),
-    "GA": (30.3, 35.1, -85.7, -80.7),
-    "HI": (18.8, 22.3, -160.3, -154.7),
-    "ID": (41.9, 49.1, -117.3, -111.0),
-    "IL": (36.9, 42.6, -91.6, -87.0),
-    "IN": (37.7, 41.8, -88.2, -84.7),
-    "IA": (40.3, 43.6, -96.7, -90.1),
-    "KS": (36.9, 40.1, -102.1, -94.5),
-    "KY": (36.4, 39.2, -89.6, -81.9),
-    "LA": (28.9, 33.1, -94.1, -88.7),
-    "ME": (42.9, 47.5, -71.2, -66.9),
-    "MD": (37.8, 39.8, -79.5, -75.0),
-    "MA": (41.2, 42.9, -73.6, -69.9),
-    "MI": (41.6, 48.4, -90.5, -82.1),
-    "MN": (43.4, 49.5, -97.3, -89.4),
-    "MS": (30.1, 35.1, -91.7, -88.0),
-    "MO": (35.9, 40.7, -95.8, -89.0),
-    "MT": (44.3, 49.1, -116.1, -104.0),
-    "NE": (39.9, 43.1, -104.1, -95.2),
-    "NV": (35.0, 42.1, -120.1, -114.0),
-    "NH": (42.6, 45.4, -72.6, -70.6),
-    "NJ": (38.9, 41.4, -75.6, -73.8),
-    "NM": (31.3, 37.1, -109.1, -103.0),
-    "NY": (40.4, 45.1, -79.8, -71.8),
-    "NC": (33.8, 36.7, -84.4, -75.4),
-    "ND": (45.9, 49.1, -104.1, -96.5),
-    "OH": (38.3, 42.0, -84.9, -80.5),
-    "OK": (33.6, 37.1, -103.1, -94.4),
-    "OR": (41.9, 46.3, -124.7, -116.4),
-    "PA": (39.7, 42.3, -80.6, -74.6),
-    "RI": (41.1, 42.1, -71.9, -71.1),
-    "SC": (32.0, 35.3, -83.4, -78.5),
-    "SD": (42.4, 45.95, -104.1, -96.4),
-    "TN": (34.9, 36.7, -90.4, -81.6),
-    "TX": (25.8, 36.6, -106.7, -93.5),
-    "UT": (36.9, 42.1, -114.1, -109.0),
-    "VT": (42.7, 45.1, -73.5, -71.4),
-    "VA": (36.5, 39.5, -83.7, -75.2),
-    "WA": (45.5, 49.1, -124.9, -116.9),
-    "WV": (37.1, 40.7, -82.7, -77.7),
-    "WI": (42.4, 47.4, -92.9, -86.7),
-    "WY": (40.9, 45.1, -111.1, -104.0),
-    "PR": (17.8, 18.6, -67.4, -65.2),
-}
 
 
 def _km(a: VenueRow, b: VenueRow) -> float:
@@ -170,12 +117,66 @@ def test_every_row_resolves_through_the_catalog_by_its_own_id() -> None:
         assert (stadium.latitude, stadium.longitude) == (row.latitude, row.longitude)
 
 
-def test_a_venue_name_shared_by_different_places_is_not_guessed_from_the_name() -> None:
+def test_the_catalog_is_id_only_so_a_shared_name_is_never_guessed() -> None:
     catalog = catalog_from_rows(ROWS)
     names = [row.name for row in ROWS]
 
     for name in {name for name in names if names.count(name) > 1}:
         assert catalog.for_venue("", name) is None, f"{name!r} resolved by name alone"
+    assert catalog.for_venue("", ROWS[0].name) is None
+
+
+# ------------------------------------------------------------------- the roofs
+
+# Checked by hand against each stadium: every one of these is a dome, a fixed roof or a
+# retractable roof, which the bot treats as covered. Adding to or removing from the table's
+# covered set means changing this list on purpose.
+COVERED = {
+    "1964": "JMA Wireless Dome",
+    "3493": "Caesars Superdome",
+    "3604": "Alamodome",
+    "3605": "Alerus Center",
+    "3687": "AT&T Stadium",
+    "3714": "Fargodome",
+    "3727": "Ford Field",
+    "3812": "Lucas Oil Stadium",
+    "3891": "Reliant Stadium",
+    "3970": "State Farm Stadium",
+    "4251": "Chase Field",
+    "5348": "Mercedes-Benz Stadium",
+    "5455": "Ford Center At The Star",
+    "6501": "Allegiant Stadium",
+    "7065": "SoFi Stadium",
+}
+
+# Famous open-air stadiums: if one of these were marked covered the bot would never
+# recommend a snowy game there.
+OPEN_AIR = {
+    "347": "Camp Randall Stadium",
+    "1056": "Rose Bowl",
+    "3558": "Michigan Stadium",
+    "3626": "Autzen Stadium",
+    "3632": "Beaver Stadium",
+    "3657": "Bryant-Denny Stadium",
+    "3765": "Husky Stadium",
+    "3795": "Kyle Field",
+    "3853": "Neyland Stadium",
+    "3855": "Notre Dame Stadium",
+    "3861": "Ohio Stadium",
+    "3917": "Sanford Stadium",
+}
+
+
+def test_the_covered_venues_are_exactly_the_ones_checked_by_hand() -> None:
+    assert {row.id: row.name for row in ROWS if row.is_covered} == COVERED
+
+
+@pytest.mark.parametrize(("venue_id", "name"), OPEN_AIR.items())
+def test_a_well_known_open_air_stadium_is_not_covered(venue_id: str, name: str) -> None:
+    row = ROWS_BY_ID[venue_id]
+
+    assert row.name == name
+    assert row.is_covered is False
 
 
 # ------------------------------------------------------------ the NFL overlap

@@ -159,9 +159,12 @@ def parse_table(text: str) -> list[VenueRow]:
 
 
 def catalog_from_rows(rows: Iterable[VenueRow]) -> VenueCatalog:
-    """A catalog keyed by venue id then name/alias - and, unlike the NFL's, with no
-    team-to-stadium fallback: college teams play at neutral sites too often to guess."""
-    return VenueCatalog(row.to_stadium() for row in rows)
+    """A catalog that finds a venue by its ESPN id alone. A name is no guide at this
+    scale - towns share a "Memorial Stadium" - so an unknown id is reported as drift
+    rather than matched to another town's weather. Unlike the NFL's there's no
+    team-to-stadium fallback either: college teams play at neutral sites too often to
+    guess."""
+    return VenueCatalog((row.to_stadium() for row in rows), match_names=False)
 
 
 def load_packaged_table(filename: str) -> list[VenueRow]:
