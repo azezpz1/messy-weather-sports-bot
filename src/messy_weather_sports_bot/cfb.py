@@ -61,8 +61,10 @@ CFB = Sport(
     parse_neutral_site=True,
     parse_rankings=True,
     venue_update_hint=(
-        "Rerun scripts/generate_cfb_venues.py (see the README) to add the venue to "
-        "src/messy_weather_sports_bot/data/cfb_venues.json."
+        "Rerun scripts/generate_cfb_venues.py with --range START:END covering the game's date "
+        "(its default range stops at today, so it can't see a venue that hasn't hosted a "
+        "game yet), or add an override in scripts/data/cfb_venue_overrides.json - see the "
+        "README's college football venue data section."
     ),
     game_filter=ranked_only,
 )

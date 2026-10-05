@@ -154,6 +154,11 @@ def test_the_command_checks_college_football_with_sport_cfb(
     assert cfb_route.called
     assert not nfl_route.called
     assert capsys.readouterr().out.startswith("Checked 0 game(s) from 2026-01-11 to 2026-01-18.")
+    # The script builds its own client: ESPN must see httpx's default User-Agent, and the
+    # college request must carry the same parameters as the bot's.
+    request = cfb_route.calls.last.request
+    assert request.headers["user-agent"].startswith("python-httpx/")
+    assert dict(request.url.params) == {"dates": "20260118", "groups": "80", "limit": "400"}
 
 
 @respx.mock

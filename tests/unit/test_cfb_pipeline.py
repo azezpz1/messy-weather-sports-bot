@@ -229,7 +229,7 @@ def test_a_big_slate_with_no_ranking_fields_is_a_degraded_run_not_a_clean_one(
         exit_code = run()
 
     assert exit_code == EXIT_PARTIAL
-    assert "no rankings for any of 8 Top 25 college football games" in caplog.text
+    assert "no rankings for any of the 8 games" in caplog.text
 
 
 @respx.mock
@@ -268,14 +268,19 @@ def test_the_nfl_never_expects_rankings(caplog: pytest.LogCaptureFixture) -> Non
 
 
 @respx.mock
-def test_rankings_that_disappear_do_not_block_a_game_that_still_posts() -> None:
-    # One ranked, messy game among many that carry no ranking field: it is still posted
-    # (the guard only matters when nothing is).
-    events = [cfb_event("Ohio State", "Minnesota", home_rank=1), *unranked_slate(8)]
-    mock_slate(CFB, events)
-    mock_college_weather(OHIO_STADIUM, RAIN)
+def test_a_slate_where_only_some_games_lack_rankings_is_not_suspect(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # One game still carries its ranking field (99 = unranked): rankings are arriving, so a
+    # few games without one - say, FCS-only matchups - aren't a response change.
+    reporting = cfb_event("Home 0", "Away 0")
+    others = unranked_slate(7, home_curated=MISSING, away_curated=MISSING)
+    mock_slate(CFB, [reporting, *others])
 
-    assert run() == EXIT_OK
+    with caplog.at_level(logging.WARNING, logger=LOGGER):
+        assert run() == EXIT_OK
+
+    assert caplog.text == ""
 
 
 # --------------------------------------------- separate accounts, state, healthcheck
@@ -367,3 +372,22 @@ def test_a_damaged_venue_table_fails_only_the_college_run(
         assert run(NFL) == EXIT_OK
     finally:
         cfb_catalog.cache_clear()
+
+
+@respx.mock
+def test_the_cfb_command_runs_the_college_bot_and_pings_only_its_own_check(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Both checks are configured; any ping to the NFL's would hit an unmocked host and fail.
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc.example/nfl-check")
+    monkeypatch.setenv("CFB_HEALTHCHECK_URL", "https://hc.example/cfb-check")
+    pings = respx.route(host="hc.example").mock(return_value=httpx.Response(200, text="OK"))
+    mock_messy_ranked_game()
+
+    assert cfb.main(["--dry-run"]) == EXIT_OK
+
+    assert "Messy Top 25 college football games to watch" in capsys.readouterr().out
+    assert [(call.request.method, call.request.url.path) for call in pings.calls] == [
+        ("GET", "/cfb-check/start"),
+        ("POST", "/cfb-check/0"),
+    ]

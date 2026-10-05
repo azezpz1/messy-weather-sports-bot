@@ -3,6 +3,8 @@ and the venue table it reads."""
 
 import dataclasses
 import datetime as dt
+import subprocess
+import sys
 
 import pytest
 
@@ -124,7 +126,6 @@ def test_the_catalog_is_not_read_until_it_is_needed(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(cfb, "load_packaged_table", spy)
     try:
-        assert calls == []  # importing and configuring CFB read nothing
         CFB.venue_catalog()
         CFB.venue_catalog()
         assert calls == ["cfb_venues.json"]
@@ -137,3 +138,19 @@ def test_the_college_sport_is_hashable_and_replaceable_like_any_other() -> None:
     # stays hashable.
     assert hash(CFB) == hash(dataclasses.replace(CFB))
     assert dict(CFB.scoreboard_params) == {"groups": "80", "limit": "400"}
+
+
+def test_importing_the_bots_never_reads_the_table() -> None:
+    # In a fresh interpreter, so a table read at import time (which a damaged file would
+    # turn into a failure of the NFL bot too) can't have happened before this test.
+    code = """
+import messy_weather_sports_bot.venue_table as venue_table
+
+def refuse(*args, **kwargs):
+    raise AssertionError("the venue table was read at import time")
+
+venue_table.load_packaged_table = refuse
+import messy_weather_sports_bot.cfb, messy_weather_sports_bot.nfl, messy_weather_sports_bot.sports
+assert messy_weather_sports_bot.cfb.cfb_catalog.cache_info().currsize == 0
+"""
+    subprocess.run([sys.executable, "-c", code], check=True, capture_output=True, text=True)

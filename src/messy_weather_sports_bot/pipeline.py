@@ -209,9 +209,9 @@ class GameDayPipeline:
         ):
             return False
         logger.warning(
-            "ESPN reported no rankings for any of %d %s games; its response may have changed.",
+            "ESPN reported no rankings for any of the %d games on this slate, so a ranking "
+            "filter would drop them all; its response may have changed.",
             len(games),
-            self.sport.name,
         )
         return True
 

@@ -66,12 +66,12 @@ uv sync
 ```
 
 Note the two different names: the checkout directory is
-`messy-weather-sports-bot` (the repo's name), while the command it installs is
-`messy-weather-nfl-bot`. The installed package (and so the version line that
+`messy-weather-sports-bot` (the repo's name), while the commands it installs are
+`messy-weather-nfl-bot` and `messy-weather-cfb-bot`. The installed package (and so the version line that
 starts every run's log) also uses the repo's name, `messy-weather-sports-bot`,
 not the command's - match on that if you grep logs for the version line. Paths
 in crontab entries below need the directory name. A `cd` into a nonexistent
-`messy-weather-nfl-bot` directory fails before the command after it runs, and a
+`messy-weather-nfl-bot` (or `-cfb-bot`) directory fails before the command after it runs, and a
 `>> log 2>&1` at the end of the entry only captures that later command - so the
 failure never reaches the log, and an update job pointed at the wrong directory
 goes unnoticed while the checkout your posts run from never updates. The update
@@ -245,7 +245,7 @@ run it daily through the season (August to January):
 
 ```cron
 # m h  dom mon dow          command
-0  9   8-12,1 * *            cd /path/to/messy-weather-sports-bot && uv run messy-weather-cfb-bot
+0  9   *   8-12,1   *        cd /path/to/messy-weather-sports-bot && uv run messy-weather-cfb-bot
 ```
 
 Cron does not load your shell profile or `.env` files automatically, so
@@ -351,8 +351,10 @@ runs weekly during each season - one job for the NFL, one for college football -
 and fails if any upcoming US game's venue isn't recognized, so a stadium rename
 or relocation is caught before it quietly drops a team's home games. (The
 college job checks every game, not only the ranked ones, since any venue can
-host a ranked team next week; for a venue it doesn't know, rerun the
-[generator](#college-football-venue-data).) It also runs on pull requests that
+host a ranked team next week. For a venue it doesn't know, rerun the
+[generator](#college-football-venue-data) with `--range` covering that game's date
+- its default range stops at today, so it can't see a venue that hasn't hosted
+a game yet - or add an override.) It also runs on pull requests that
 touch a venue table (`stadiums.py`, `data/cfb_venues.json`), the code the check
 runs through (`venues.py`, `venue_table.py`, `espn.py`, `schedule.py`,
 `sport.py`, `sports.py`, `nfl.py`, `cfb.py`, `drift.py`), the check script, or
