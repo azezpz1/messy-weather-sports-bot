@@ -2,21 +2,29 @@ name: Venue drift check
 
 on:
   schedule:
-    # Every Monday at 12:00 UTC, during the NFL season (Sept through early Feb).
+    # Every Monday at 12:00 UTC, during each sport's season: the NFL's (Sept through early
+    # Feb) and college football's (Aug through Jan). Each job below runs only for its own
+    # cron, so in the months they overlap the two firings don't repeat each other's check.
     - cron: "0 12 * 9-12,1-2 1"
-  # Also run when the venue table or the check itself changes - including the code
-  # the check runs through (the scoreboard fetch, venue resolution and the NFL's
+    - cron: "0 12 * 8-12,1 1"
+  # Also run when a venue table or the check itself changes - including the code the
+  # check runs through (the scoreboard fetch, venue resolution and each sport's
   # configuration) - so a bad edit to any of them is caught before merge.
   # Path-filtered so unrelated PRs don't depend on ESPN being reachable (see the
   # note on unit tests in ci.yml).
   pull_request:
     paths:
       - src/messy_weather_sports_bot/stadiums.py
+      - src/messy_weather_sports_bot/data/cfb_venues.json
+      - src/messy_weather_sports_bot/venue_table.py
       - src/messy_weather_sports_bot/venues.py
       - src/messy_weather_sports_bot/espn.py
       - src/messy_weather_sports_bot/schedule.py
       - src/messy_weather_sports_bot/sport.py
+      - src/messy_weather_sports_bot/sports.py
       - src/messy_weather_sports_bot/nfl.py
+      - src/messy_weather_sports_bot/cfb.py
+      - src/messy_weather_sports_bot/drift.py
       - scripts/check_venue_drift.py
       - .github/workflows/venue-drift-check.yml
   workflow_dispatch: {}
@@ -25,8 +33,9 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  nfl:
     runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' || github.event.schedule == '0 12 * 9-12,1-2 1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -42,5 +51,26 @@ jobs:
 
       # Fails the job (and notifies via the repo's normal Actions failure
       # notifications) when a US game's venue isn't recognized in stadiums.py.
-      - name: Check for venue drift
-        run: uv run python scripts/check_venue_drift.py
+      - name: Check for NFL venue drift
+        run: uv run python scripts/check_venue_drift.py --sport nfl
+
+  cfb:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'schedule' || github.event.schedule == '0 12 * 8-12,1 1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # Fails the job when a US game's venue isn't in data/cfb_venues.json. Every game is
+      # checked, not just the ranked ones: any venue can host a ranked team next week.
+      - name: Check for college football venue drift
+        run: uv run python scripts/check_venue_drift.py --sport cfb
