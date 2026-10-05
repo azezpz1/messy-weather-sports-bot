@@ -34,6 +34,14 @@ class Game:
     """True when `unresolved_reason` signals the venue table is out of date (an
     unrecognized US venue) rather than an expected, ignorable skip - see
     `venue_drift()`."""
+    home_rank: int | None = None
+    away_rank: int | None = None
+    """A team's poll ranking (1-25), for a sport that reads them; None when unranked."""
+    neutral_site: bool = False
+    """True when the game isn't at either team's home field (and the sport reads it)."""
+    rankings_reported: bool = False
+    """True when ESPN sent a ranking field for this game's teams at all - ranked or not -
+    so a run can tell "nobody is ranked" from "ESPN stopped sending rankings"."""
 
 
 def todays_game_day(sport: Sport, now: dt.datetime | None = None) -> dt.date:

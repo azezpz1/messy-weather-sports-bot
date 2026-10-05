@@ -10,9 +10,13 @@ from __future__ import annotations
 import datetime as dt
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from messy_weather_sports_bot.venues import VenueCatalog
+
+if TYPE_CHECKING:
+    from messy_weather_sports_bot.schedule import Game
 
 
 @dataclass(frozen=True)
@@ -44,6 +48,23 @@ class Sport:
     state_key: str | None = None
     """Marks this sport's per-day post state file, so two sports posting on the same
     day don't read each other's progress. None keeps the original `<date>.json` name."""
+    scoreboard_params: tuple[tuple[str, str], ...] = ()
+    """Query parameters sent with every scoreboard request, besides `dates` - as name/value
+    pairs so the sport stays hashable. The NFL sends none."""
+    team_label_fields: tuple[str, ...] = ("abbreviation",)
+    """ESPN `team` fields to label a team with, first non-empty one wins. A sport whose
+    abbreviations read ambiguously ("OSU") lists a friendlier field ahead of it."""
+    parse_neutral_site: bool = False
+    """Whether a game's `neutralSite` flag is read, so the post can say "vs" rather than
+    "@" - the home team isn't hosting."""
+    parse_rankings: bool = False
+    """Whether each team's `curatedRank` is read into the game, for post labels and
+    `game_filter`."""
+    venue_update_hint: str = ""
+    """What to do when the drift check finds a venue the sport's table doesn't know."""
+    game_filter: Callable[[Game], str | None] | None = None
+    """Decides which games the sport covers: returns why a game is left out, or None to
+    keep it. Applied before any weather lookup, so a game left out costs no requests."""
 
     def game_day_for(self, instant: dt.datetime) -> dt.date:
         """The game day `instant` falls on. Raises ValueError for a timezone-naive
