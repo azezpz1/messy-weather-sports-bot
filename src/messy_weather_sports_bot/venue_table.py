@@ -71,7 +71,10 @@ class VenueRow:
 def id_order(venue_id: str) -> tuple[int, int, str]:
     """Sort key for venue ids: ESPN's are numeric strings, ordered numerically, with any
     other id after them."""
-    return (0, int(venue_id), venue_id) if venue_id.isdigit() else (1, 0, venue_id)
+    # ASCII only: str.isdigit() is also true for characters such as "²" that int() refuses.
+    if venue_id.isascii() and venue_id.isdigit():
+        return (0, int(venue_id), venue_id)
+    return (1, 0, venue_id)
 
 
 def dump_table(rows: Iterable[VenueRow]) -> str:
@@ -85,8 +88,7 @@ def dump_table(rows: Iterable[VenueRow]) -> str:
 
 def _require(row: dict, key: str, kind: type, where: str):
     value = row.get(key)
-    # bool is an int subclass: a stray `true` must not pass for a number.
-    if not isinstance(value, kind) or (kind is not bool and isinstance(value, bool)):
+    if not isinstance(value, kind):
         raise ValueError(f"{where}: {key!r} must be {kind.__name__}, got {value!r}")
     return value
 

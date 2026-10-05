@@ -81,6 +81,11 @@ def test_id_order_puts_numeric_ids_first_in_numeric_order() -> None:
     assert sorted(["10", "9", "x", "100"], key=id_order) == ["9", "10", "100", "x"]
 
 
+def test_id_order_does_not_choke_on_a_digit_int_cannot_read() -> None:
+    # "²".isdigit() is true but int("²") raises; only plain 0-9 ids are numbers.
+    assert sorted(["10", "²", "9"], key=id_order) == ["9", "10", "²"]
+
+
 @pytest.mark.parametrize(
     ("text", "message"),
     [

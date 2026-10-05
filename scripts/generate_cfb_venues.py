@@ -53,8 +53,7 @@ def _fail(problem: object) -> int:
     since the text can include something ESPN or a geocoder said."""
     if isinstance(problem, BaseException):
         problem = f"{type(problem).__name__}: {problem}"
-    text = "".join(char if char.isprintable() else repr(char)[1:-1] for char in str(problem))
-    print(f"error: {text}", file=sys.stderr)
+    print(f"error: {generation.printable(problem)}", file=sys.stderr)
     return 1
 
 
@@ -87,12 +86,12 @@ def main(argv: list[str] | None = None) -> int:
 
     ranges = args.ranges or generation.season_ranges(dt.date.today())
     try:
-        existing = parse_table(args.output.read_text()) if args.output.exists() else []
+        existing = parse_table(args.output.read_text("utf-8")) if args.output.exists() else []
         overrides_path = args.overrides or DEFAULT_OVERRIDES
         if args.overrides is None and not overrides_path.exists():
             overrides = {}
         else:
-            overrides = generation.parse_overrides(overrides_path.read_text())
+            overrides = generation.parse_overrides(overrides_path.read_text("utf-8"))
     except (OSError, ValueError) as exc:
         return _fail(exc)
 
@@ -110,6 +109,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"{harvested.events_without_venue_id} game(s) had no venue id.",
                 file=sys.stderr,
             )
+            if harvested.unreadable:
+                print(
+                    f"warning: {harvested.unreadable} scoreboard response(s) or game(s) could "
+                    "not be read and were skipped; a venue played only there is missing.",
+                    file=sys.stderr,
+                )
             if not harvested.events:
                 return _fail(
                     "ESPN returned no games for the date range, so there is nothing to build"
@@ -134,8 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             # Never write a table the runtime couldn't read back.
             parse_table(text)
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_text(text)
+            generation.write_text_atomic(args.output, text)
         except (OSError, ValueError) as exc:
             return _fail(exc)
         print(f"\nWrote {len(result.rows)} venue(s) to {args.output}.")

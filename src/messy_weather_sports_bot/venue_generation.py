@@ -254,27 +254,50 @@ class Harvest:
     days: int = 0
     events: int = 0
     events_without_venue_id: int = 0
+    unreadable: int = 0
+    """Responses that weren't a scoreboard and games with nothing to read. They are skipped
+    rather than failing the run, but counted so a day ESPN answered oddly isn't lost
+    silently: a venue played only on that day would be missing from the table."""
+    event_ids: set[str] = field(default_factory=set)
+    """ESPN's id of every game seen, so one reported twice (overlapping `--range`s, or a
+    game listed under two dates) is counted once."""
+
+
+def _mapping(value: object) -> dict:
+    """`value` if it's a JSON object, else an empty one - so an oddly shaped field reads as
+    missing instead of raising."""
+    return value if isinstance(value, dict) else {}
 
 
 def observe_scoreboard(payload: object, harvest: Harvest) -> None:
-    """Fold one scoreboard response into `harvest`. Tolerant: an event it can't make
-    sense of is skipped (and counted, if it has no venue id) rather than failing the run."""
-    if not isinstance(payload, dict):
+    """Fold one scoreboard response into `harvest`. Tolerant: a response or game it can't
+    make sense of is skipped (and counted, in `harvest.unreadable`) rather than failing the
+    run, and a game with no venue id is counted in `events_without_venue_id`."""
+    events = payload.get("events", []) if isinstance(payload, dict) else None
+    if not isinstance(events, list):
+        harvest.unreadable += 1
         return
-    for event in payload.get("events") or []:
+    for event in events:
         competitions = event.get("competitions") if isinstance(event, dict) else None
-        if not competitions or not isinstance(competitions[0], dict):
+        has_game = isinstance(competitions, list) and competitions
+        if not has_game or not isinstance(competitions[0], dict):
+            harvest.unreadable += 1
             continue
+        event_id = str(event.get("id") or "")
+        if event_id:
+            if event_id in harvest.event_ids:
+                continue
+            harvest.event_ids.add(event_id)
         competition = competitions[0]
         harvest.events += 1
         neutral = bool(competition.get("neutralSite"))
-        venue = competition.get("venue") or {}
+        venue = _mapping(competition.get("venue"))
         venue_id = str(venue.get("id") or "")
         if not venue_id:
             harvest.events_without_venue_id += 1
         else:
             observation = harvest.venues.setdefault(venue_id, VenueObservation(venue_id))
-            address = venue.get("address") or {}
+            address = _mapping(venue.get("address"))
             for counter, value in (
                 (observation.names, venue.get("fullName")),
                 (observation.cities, address.get("city")),
@@ -286,8 +309,10 @@ def observe_scoreboard(payload: object, harvest: Harvest) -> None:
                     counter[text] += 1
             observation.indoor = observation.indoor or bool(venue.get("indoor"))
             observation.games += 1
-        for competitor in competition.get("competitors") or []:
-            team = competitor.get("team") or {}
+        competitors = competition.get("competitors")
+        for competitor in competitors if isinstance(competitors, list) else []:
+            competitor = _mapping(competitor)
+            team = _mapping(competitor.get("team"))
             team_id = str(team.get("id") or "")
             if not team_id:
                 continue
@@ -360,6 +385,10 @@ SPORTS_GROUND_CLASSES = frozenset(
 )
 
 _GENERIC_TOKENS = frozenset({"the", "at", "of", "and"})
+
+_VENUE_WORDS = frozenset({"stadium", "field", "park", "bowl", "dome", "arena", "center", "complex"})
+"""Words every venue name has. A partial name match needs a word beyond these: OSM's plain
+"Stadium" is not evidence of anything, whichever stadium ESPN means."""
 
 
 def _tokens(text: str) -> tuple[str, ...]:
@@ -497,6 +526,16 @@ class RateLimiter:
         self._last = self._clock()
 
 
+def write_text_atomic(path: Path, text: str) -> None:
+    """Write `text` to `path` as UTF-8 without ever leaving it half-written: the text goes to
+    a sibling file first, which then replaces `path` in one step. (The table is written with
+    `ensure_ascii=False`, so the encoding is fixed rather than left to the locale.)"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pending = path.with_name(f".{path.name}.tmp")
+    pending.write_text(text, encoding="utf-8")
+    pending.replace(path)
+
+
 class JsonCache:
     """Raw geocoder responses saved to a JSON file, so a rerun (or a tweak to the
     acceptance rules) doesn't query the service again. With no path it's in-memory."""
@@ -506,7 +545,7 @@ class JsonCache:
         self._data: dict[str, list] = {}
         if path is not None and path.exists():
             try:
-                loaded = json.loads(path.read_text())
+                loaded = json.loads(path.read_text("utf-8"))
             except (OSError, json.JSONDecodeError):
                 loaded = {}
             if isinstance(loaded, dict):
@@ -518,8 +557,7 @@ class JsonCache:
     def put(self, key: str, features: list) -> None:
         self._data[key] = features
         if self._path is not None:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            self._path.write_text(json.dumps(self._data, sort_keys=True))
+            write_text_atomic(self._path, json.dumps(self._data, sort_keys=True))
 
 
 class PhotonGeocoder:
@@ -554,7 +592,11 @@ class PhotonGeocoder:
             response.raise_for_status()
             return response
 
-        features = request_with_retry(_get).json().get("features") or []
+        body = request_with_retry(_get).json()
+        features = (body.get("features") or []) if isinstance(body, dict) else None
+        if not isinstance(features, list):
+            kind = type(body).__name__
+            raise ValueError(f"Unexpected Photon response shape: expected an object, got {kind}")
         self._cache.put(key, features)
         return features
 
@@ -605,15 +647,25 @@ class PhotonGeocoder:
         return GeocodeOutcome(best, tuple(notes))
 
 
+_PLACE_QUALIFIERS = frozenset({"township", "twp", "charter", "city", "town", "village", "borough"})
+"""Words that may follow or precede a place name without making it a different place
+("Oxford Township" is Oxford; "York" is not "New York")."""
+
+
 def _city_matches(candidate: Geocode, city: str) -> bool:
-    """Whether OSM places the venue in ESPN's city - allowing "Oxford" for "Oxford
-    Township", where one name's words are all within the other's."""
+    """Whether OSM places the venue in ESPN's city: the same words, or one name with only a
+    qualifier such as "Township" added. Any other extra word makes a different town."""
     wanted = set(_tokens(city))
     if not wanted:
         return False
     for place in candidate.places:
         found = set(_tokens(place))
-        if found and (wanted <= found or found <= wanted):
+        if not found:
+            continue
+        if found == wanted:
+            return True
+        shorter, longer = sorted((found, wanted), key=len)
+        if shorter < longer and longer - shorter <= _PLACE_QUALIFIERS:
             return True
     return False
 
@@ -636,8 +688,14 @@ def _judge(
     if espn_tokens == osm_tokens:
         return True
     # One name contains the other ("Gies Memorial Stadium" / "Memorial Stadium"): only
-    # trust it in the right city.
-    if (espn_tokens <= osm_tokens or osm_tokens <= espn_tokens) and _city_matches(candidate, city):
+    # trust it in the right city, and only if the shared part says more than "Stadium".
+    if espn_tokens <= osm_tokens:
+        shared = espn_tokens
+    elif osm_tokens <= espn_tokens:
+        shared = osm_tokens
+    else:
+        return None
+    if shared - _VENUE_WORDS and _city_matches(candidate, city):
         return False
     return None
 
@@ -811,6 +869,9 @@ class Report:
     """New rows, with the notes a reviewer should read."""
     changed: list[tuple[VenueRow, VenueRow]] = field(default_factory=list)
     """(old, new) rows that differ from what was already in the table."""
+    change_notes: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    """The reviewer notes (map link, "city differs") for a changed row, by venue id - a
+    `--refresh` that moves a coordinate is when they're most needed."""
     kept: int = 0
     removed: list[VenueRow] = field(default_factory=list)
     """Rows that were in the table and aren't in the new one: an exclusion override, or a
@@ -960,6 +1021,8 @@ def build_table(
             report.added.append((final, notes))
         elif old != final:
             report.changed.append((old, final))
+            if notes:
+                report.change_notes[final.id] = notes
         else:
             report.kept += 1
         rows[row.id] = final
@@ -978,6 +1041,10 @@ def build_table(
         else:
             row, notes, reasons = _resolve(observation, override, nfl_catalog, geocoder)
             if row is None:
+                if override is not None:
+                    # It matched this venue; it just doesn't say where the venue is.
+                    used.add(venue_id)
+                    reasons = (*reasons, "its override gives no coordinates")
                 unplace(venue_id, description, reasons)
             else:
                 settle(row, notes, description)
@@ -1031,47 +1098,68 @@ def coverage_gaps(harvested: Harvest, rows: Mapping[str, VenueRow]) -> list[str]
     return gaps
 
 
+def printable(text: object) -> str:
+    """`text` with its control characters escaped (a newline becomes the two characters
+    `\\n`), for printing something an API said - a venue name, a team - to a terminal
+    without it being able to move the cursor or fake a line of the report."""
+    return "".join(char if char.isprintable() else repr(char)[1:-1] for char in str(text))
+
+
 def format_report(result: BuildResult, *, venues_seen: int) -> str:
     """The reviewer's report: what's new (with a map link to check each against), what
-    changed or was removed, and what needs a human."""
+    changed or was removed, and what needs a human. Every line is escaped with `printable`,
+    since most of it is text from ESPN or OpenStreetMap."""
     report = result.report
-    lines = [
+    lines: list[str] = []
+
+    def line(text: str) -> None:
+        lines.append(printable(text))
+
+    def section(heading: str) -> None:
+        lines.extend(["", printable(heading)])
+
+    line(
         f"{venues_seen} venue(s) seen, {len(result.rows)} in the table "
         f"({report.kept} kept, {len(report.added)} added, {len(report.changed)} changed, "
-        f"{len(report.removed)} removed).",
-    ]
+        f"{len(report.removed)} removed)."
+    )
     if report.added:
-        lines.append("\nAdded - check each against its map link (if it has one):")
+        section("Added - check each against its map link (if it has one):")
         for row, notes in report.added:
             detail = f" [{'; '.join(notes)}]" if notes else ""
-            lines.append(
+            line(
                 f"  {row.id:>6} {row.name}, {row.city}, {row.state}: "
                 f"{row.latitude:.5f}, {row.longitude:.5f} ({row.precision}, "
                 f"{'covered' if row.is_covered else 'open'}, {row.source}){detail}"
             )
     if report.changed:
-        lines.append("\nChanged:")
+        section("Changed:")
         for old, new in report.changed:
-            lines.append(f"  {old.id:>6} {old.name}: {_describe_change(old, new)}")
+            notes = report.change_notes.get(new.id, ())
+            detail = f" [{'; '.join(notes)}]" if notes else ""
+            line(f"  {old.id:>6} {old.name}: {_describe_change(old, new)}{detail}")
     if report.removed:
-        lines.append("\nRemoved from the table:")
+        section("Removed from the table:")
         for row in report.removed:
-            lines.append(f"  {row.id:>6} {row.name}, {row.city}, {row.state}")
+            line(f"  {row.id:>6} {row.name}, {row.city}, {row.state}")
     if report.needs_manual:
-        lines.append("\nNeeds a person (supply or fix the row in the overrides file):")
+        section("Needs a person (supply or fix the row in the overrides file):")
         for entry in report.needs_manual:
-            lines.append(f"  {entry.venue_id:>6} {entry.description} - {'; '.join(entry.reasons)}")
+            line(f"  {entry.venue_id:>6} {entry.description} - {'; '.join(entry.reasons)}")
     if report.unused_overrides:
-        lines.append("\nOverrides that matched no venue (a mistyped id, or gone stale?):")
-        lines.extend(f"  {entry}" for entry in report.unused_overrides)
+        section("Overrides that matched no venue (a mistyped id, or gone stale?):")
+        for entry in report.unused_overrides:
+            line(f"  {entry}")
     if report.coverage_gaps:
-        lines.append("\nTeams with no home venue in the table:")
-        lines.extend(f"  {gap}" for gap in report.coverage_gaps)
+        section("Teams with no home venue in the table:")
+        for gap in report.coverage_gaps:
+            line(f"  {gap}")
     if report.international:
-        lines.append(f"\nSkipped as international: {'; '.join(report.international)}")
+        section(f"Skipped as international: {'; '.join(report.international)}")
     if report.excluded:
-        lines.append("\nExcluded by overrides:")
-        lines.extend(f"  {entry}" for entry in report.excluded)
+        section("Excluded by overrides:")
+        for entry in report.excluded:
+            line(f"  {entry}")
     return "\n".join(lines)
 
 

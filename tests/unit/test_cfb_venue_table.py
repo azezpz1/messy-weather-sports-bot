@@ -47,12 +47,12 @@ def _km(a: VenueRow, b: VenueRow) -> float:
 
 
 def test_the_packaged_table_is_the_file_in_the_repo() -> None:
-    assert parse_table(TABLE_PATH.read_text()) == ROWS
+    assert parse_table(TABLE_PATH.read_text("utf-8")) == ROWS
 
 
 def test_the_file_is_in_canonical_form_so_a_hand_edit_shows_up() -> None:
     # Regeneration writes exactly this text; anything else means the file was edited by hand.
-    assert TABLE_PATH.read_text() == dump_table(ROWS)
+    assert TABLE_PATH.read_text("utf-8") == dump_table(ROWS)
 
 
 def test_the_table_covers_the_fbs() -> None:
@@ -117,13 +117,12 @@ def test_every_row_resolves_through_the_catalog_by_its_own_id() -> None:
         assert (stadium.latitude, stadium.longitude) == (row.latitude, row.longitude)
 
 
-def test_the_catalog_is_id_only_so_a_shared_name_is_never_guessed() -> None:
+def test_the_catalog_is_id_only_so_a_name_or_alias_is_never_guessed() -> None:
     catalog = catalog_from_rows(ROWS)
-    names = [row.name for row in ROWS]
 
-    for name in {name for name in names if names.count(name) > 1}:
-        assert catalog.for_venue("", name) is None, f"{name!r} resolved by name alone"
-    assert catalog.for_venue("", ROWS[0].name) is None
+    for row in ROWS:
+        for name in (row.name, *row.aliases):
+            assert catalog.for_venue("", name) is None, f"{name!r} resolved by name alone"
 
 
 # ------------------------------------------------------------------- the roofs
@@ -207,7 +206,7 @@ def test_a_venue_that_is_in_the_nfl_table_is_never_given_different_coordinates()
 
 
 def test_overrides_are_reflected_in_the_table() -> None:
-    overrides = parse_overrides(OVERRIDES_PATH.read_text())
+    overrides = parse_overrides(OVERRIDES_PATH.read_text("utf-8"))
 
     for venue_id, override in overrides.items():
         if override.exclude:

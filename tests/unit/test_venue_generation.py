@@ -1388,3 +1388,205 @@ def test_the_first_search_is_enough_when_it_finds_the_right_city() -> None:
     _geocoder().geocode("Old Park", "Athens", "GA")
 
     assert route.call_count == 1
+
+
+# ------------------------------------- odd responses, repeats and what gets printed
+
+
+@pytest.mark.parametrize("payload", [None, [], "x", {"events": None}, {"events": "x"}])
+def test_a_response_that_is_not_a_scoreboard_is_counted_as_unreadable(payload: object) -> None:
+    harvested = Harvest()
+
+    observe_scoreboard(payload, harvested)
+
+    assert harvested.unreadable == 1
+
+
+@pytest.mark.parametrize("payload", [{}, {"events": []}])
+def test_a_day_with_no_games_is_not_unreadable(payload: dict) -> None:
+    harvested = Harvest()
+
+    observe_scoreboard(payload, harvested)
+
+    assert harvested.unreadable == 0
+
+
+def test_a_game_with_nothing_to_read_is_counted_and_the_rest_are_kept() -> None:
+    harvested = Harvest()
+    events = ["x", {}, {"competitions": []}, {"competitions": ["x"]}, cfb_event("1")]
+
+    observe_scoreboard({"events": events}, harvested)
+
+    assert harvested.unreadable == 4
+    assert list(harvested.venues) == ["1"]
+
+
+def test_oddly_shaped_nested_fields_read_as_missing_instead_of_raising() -> None:
+    no_venue = {"competitions": [{"venue": "Old Park", "competitors": ["x", {"team": "y"}]}]}
+    odd_address = {
+        "competitions": [{"venue": {"id": "1", "address": "Athens"}, "competitors": {"a": 1}}]
+    }
+
+    harvested = harvest_of(no_venue, odd_address)
+
+    assert (harvested.events, harvested.events_without_venue_id) == (2, 1)
+    assert (harvested.venues["1"].games, harvested.venues["1"].city) == (1, "")
+    assert harvested.teams == {}
+
+
+def test_a_game_reported_twice_is_counted_once() -> None:
+    first = {**cfb_event("1"), "id": "401"}
+    second = {**cfb_event("1"), "id": "402"}
+
+    harvested = harvest_of(first, first, second)
+
+    assert (harvested.events, harvested.venues["1"].games) == (2, 2)
+    assert harvested.teams["61"].games == 2
+
+
+@pytest.mark.parametrize("body", [[], "x", 3])
+@respx.mock
+def test_a_photon_reply_that_is_not_an_object_is_an_error_not_a_traceback(body: object) -> None:
+    respx.get(gen.PHOTON_URL).mock(return_value=httpx.Response(200, json=body))
+
+    with pytest.raises(ValueError, match="Unexpected Photon response shape"):
+        _geocoder().geocode("Old Park", "Athens", "GA")
+
+
+def test_an_override_for_a_venue_that_cannot_be_placed_is_not_reported_as_unmatched() -> None:
+    overrides = _overrides({"1": {"note": "alias only", "aliases": ["The Old"]}})
+
+    result = _table(harvest_of(cfb_event("1")), FakeGeocoder(), overrides=overrides)
+
+    (unplaced,) = result.report.needs_manual
+    assert unplaced.reasons == ("rejected: nothing nearby", "its override gives no coordinates")
+    assert result.report.unused_overrides == []
+
+
+def test_a_refresh_that_moves_a_row_shows_its_map_link_and_notes() -> None:
+    moved = geocode_of(latitude=33.96, longitude=-83.38, osm_id=77)
+    outcome = GeocodeOutcome(moved, notes=("city differs: OSM says Bogart",))
+    harvested = harvest_of(cfb_event("1"))
+
+    result = _table(
+        harvested, FakeGeocoder({"Old Park": outcome}), existing=[old_park_row()], refresh=True
+    )
+    text = format_report(result, venues_seen=1)
+
+    assert result.report.change_notes == {
+        "1": ("city differs: OSM says Bogart", "https://www.openstreetmap.org/way/77")
+    }
+    assert "[city differs: OSM says Bogart; " in text
+
+
+def test_a_changed_row_with_nothing_to_note_prints_no_brackets() -> None:
+    overrides = _overrides({"1": {"note": "roof", "is_covered": True}})
+
+    result = _table(
+        harvest_of(cfb_event("1")), FakeGeocoder(), existing=[old_park_row()], overrides=overrides
+    )
+
+    text = format_report(result, venues_seen=1)
+
+    assert result.report.change_notes == {}
+    changed_line = next(line for line in text.splitlines() if "is_covered" in line)
+    assert not changed_line.endswith("]")
+
+
+def test_the_report_escapes_control_characters_from_an_api_name() -> None:
+    name = "Bad\nName\x1b[31m"
+    geocoder = FakeGeocoder({name: GeocodeOutcome(geocode_of())})
+    harvested = harvest_of(cfb_event("1", name), cfb_event("2", "Odd\rField"))
+
+    text = format_report(_table(harvested, geocoder), venues_seen=2)
+
+    assert name not in text
+    assert "\x1b" not in text
+    assert "\r" not in text
+    assert "Bad\\nName\\x1b[31m" in text
+    assert "Odd\\rField" in text
+
+
+def test_printable_escapes_only_what_cannot_be_shown() -> None:
+    assert gen.printable("a\tb\nc") == "a\\tb\\nc"
+    assert gen.printable("Café Field – 12") == "Café Field – 12"
+    assert gen.printable(ValueError("x")) == "x"
+
+
+@pytest.mark.parametrize(
+    ("espn", "osm"),
+    [("Husky Stadium", "Stadium"), ("Folsom Field", "Field"), ("Rose Bowl", "Bowl")],
+)
+def test_a_generic_osm_name_is_not_a_partial_match_for_any_stadium(espn: str, osm: str) -> None:
+    candidate = geocode_of(name=osm)
+
+    assert gen._judge(candidate, espn, "Athens", "Georgia", gen.STADIUM_CLASSES) is None
+
+
+def test_a_partial_match_with_a_distinctive_word_is_still_trusted_in_the_right_city() -> None:
+    candidate = geocode_of(name="Memorial Stadium")
+    classes = gen.STADIUM_CLASSES
+
+    assert gen._judge(candidate, "Gies Memorial Stadium", "Athens", "Georgia", classes) is False
+    assert gen._judge(candidate, "Gies Memorial Stadium", "Elsewhere", "Georgia", classes) is None
+
+
+def test_write_text_atomic_replaces_the_file_and_leaves_no_temporary(tmp_path: Path) -> None:
+    path = tmp_path / "sub" / "table.json"
+
+    gen.write_text_atomic(path, "one")
+    gen.write_text_atomic(path, "café")
+
+    assert path.read_text("utf-8") == "café"
+    assert [entry.name for entry in path.parent.iterdir()] == ["table.json"]
+
+
+def test_an_interrupted_write_leaves_the_old_file_untouched(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "table.json"
+    path.write_text("old", encoding="utf-8")
+
+    def interrupted(self: Path, target: Path) -> Path:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", interrupted)
+
+    with pytest.raises(OSError, match="disk full"):
+        gen.write_text_atomic(path, "new")
+
+    assert path.read_text("utf-8") == "old"
+
+
+def test_the_report_lists_teams_with_no_home_venue_in_the_table() -> None:
+    games = [
+        cfb_event("1", home=("61", "Georgia Bulldogs"), away=(str(n), f"Opponent {n}"))
+        for n in range(7)
+    ]
+    harvested = harvest_of(*games)
+
+    text = format_report(_table(harvested, FakeGeocoder()), venues_seen=len(harvested.venues))
+
+    assert "Teams with no home venue in the table:" in text
+    assert "  Georgia Bulldogs: hosted 7 game(s) at venues not in the table" in text
+
+
+@pytest.mark.parametrize(
+    ("espn", "osm", "matches"),
+    [
+        ("Oxford", "Oxford", True),
+        ("Oxford", "Oxford Township", True),
+        ("Oxford Township", "Oxford", True),
+        ("Oxford", "Oxford Charter Township", True),
+        ("New York", "York", False),
+        ("West Lafayette", "Lafayette", False),
+        ("Lincoln", "North Lincoln", False),
+        ("Columbia", "Columbia Heights", False),
+        ("Athens", "Athens-Clarke County", False),
+        ("", "Athens", False),
+    ],
+)
+def test_a_city_matches_only_when_the_names_differ_by_a_place_qualifier(
+    espn: str, osm: str, matches: bool
+) -> None:
+    assert gen._city_matches(geocode_of(places=(osm,)), espn) is matches

@@ -145,6 +145,13 @@ def test_a_run_writes_the_table_and_exits_zero(
     captured = capsys.readouterr()
     assert "Wrote 1 venue(s)" in captured.out
     assert "1 venue(s)" in captured.err  # the harvest summary
+    assert "could not be read" not in captured.err
+    # The table is written in one step: no half-written temporary is left beside it.
+    assert sorted(entry.name for entry in run.output.parent.iterdir()) == [
+        "cache.json",
+        "overrides.json",
+        "venues.json",
+    ]
 
 
 @respx.mock
@@ -232,6 +239,22 @@ def test_a_non_json_espn_body_exits_one_instead_of_a_traceback(run: Run) -> None
 
 
 @respx.mock
+def test_a_day_espn_answered_oddly_is_warned_about_without_stopping_the_run(
+    run: Run, photon: respx.Route, capsys: pytest.CaptureFixture[str]
+) -> None:
+    respx.get(CFB_SCOREBOARD_URL).mock(
+        side_effect=[
+            httpx.Response(200, json=_scoreboard()),
+            httpx.Response(200, json={"events": None}),
+        ]
+    )
+
+    assert run.main("--range=2025-09-07:2025-09-07") == 0
+
+    assert "1 scoreboard response(s) or game(s) could not be read" in capsys.readouterr().err
+
+
+@respx.mock
 def test_a_harvest_with_no_games_is_an_error_not_an_empty_table(
     run: Run, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -248,6 +271,16 @@ def test_a_harvest_with_no_games_is_an_error_not_an_empty_table(
 @respx.mock
 def test_a_failing_geocoder_exits_one(run: Run, espn: respx.Route) -> None:
     respx.get(PHOTON_URL).mock(return_value=httpx.Response(500))
+
+    assert run.main() == 1
+    assert not run.output.exists()
+
+
+@respx.mock
+def test_a_geocoder_reply_of_the_wrong_shape_exits_one_instead_of_a_traceback(
+    run: Run, espn: respx.Route
+) -> None:
+    respx.get(PHOTON_URL).mock(return_value=httpx.Response(200, json=[]))
 
     assert run.main() == 1
     assert not run.output.exists()

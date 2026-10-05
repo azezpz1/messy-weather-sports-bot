@@ -326,11 +326,12 @@ a row is never dropped unless you pass `--refresh` and the venue turns out to be
 outside the US, or an override excludes it - and either way it is listed under
 "Removed". `--refresh` recomputes every row; if it can't place a venue again, the
 old row stays and the venue is reported. Read the printed report before
-committing: each venue added from a geocode comes with an OpenStreetMap link to
-check it against (rows copied from the NFL table or placed by an override have no
+committing: each venue added or moved by a geocode comes with an OpenStreetMap link
+to check it against (rows copied from the NFL table or placed by an override have no
 link), and it lists what changed field by field, any venue that couldn't be
 placed, any override that matched no venue, and any FBS team with no home field
-in the table.
+in the table. A warning before it says if some scoreboard responses or games couldn't
+be read: a venue played only there is missing from the table.
 
 The script exits 0 when everything was placed, 2 when something needs a person
 (the table is still written), and 1 on an error - the network, an unreadable or
