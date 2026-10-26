@@ -710,6 +710,18 @@
     },
     {
       "aliases": [],
+      "city": "Foxborough",
+      "id": "3738",
+      "is_covered": false,
+      "latitude": 42.0909,
+      "longitude": -71.2643,
+      "name": "Gillette Stadium",
+      "precision": "stadium",
+      "source": "nfl_catalog",
+      "state": "MA"
+    },
+    {
+      "aliases": [],
       "city": "Toledo",
       "id": "3739",
       "is_covered": false,
