@@ -518,7 +518,7 @@ wheels = [
 
 [[package]]
 name = "messy-weather-sports-bot"
-version = "4.0.3"
+version = "4.0.4"
 source = { editable = "." }
 dependencies = [
     { name = "atproto" },
