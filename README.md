@@ -162,8 +162,13 @@ The history includes supported games, venue and kickoff details, and the hourly
 forecast periods used to score each game. It records clear-weather evaluations,
 unavailable forecasts, alert lookup failures, and schedule failures. Reruns
 keep their own timestamped observations, even when the day's thread is already
-posted. The bot upgrades older schemas automatically. If it cannot save the
-history, it logs a warning and continues the run.
+posted. The bot applies pending Alembic revisions automatically. If it cannot
+save the history, it logs a warning and continues the run.
+
+Schema revisions live in `src/messy_weather_sports_bot/migrations/versions/`.
+Use `uv run alembic revision -m "describe the schema change"` to create a revision.
+To apply pending revisions manually, run `uv run alembic upgrade head` with the
+same database settings as the bots.
 
 ### Failure alerting with Healthchecks.io
 

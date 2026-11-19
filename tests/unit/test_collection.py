@@ -1,4 +1,5 @@
 import datetime as dt
+import shutil
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -192,23 +193,59 @@ def test_schema_upgrade_keeps_history_and_rolls_back_a_failed_migration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     started = dt.datetime.now(dt.UTC)
-    migrations = collection._MIGRATIONS
+    path = tmp_path / "forecast-history.sqlite3"
     collection.record_collection("nfl", DAY, started, "complete", 0)
-    statement = "ALTER TABLE collection_runs ADD COLUMN source TEXT DEFAULT 'espn'"
-    monkeypatch.setattr(collection, "_MIGRATIONS", (*migrations, (statement, "invalid SQL")))
+
+    migrations = tmp_path / "migrations"
+    shutil.copytree(Path(collection.__file__).with_name("migrations"), migrations)
+    monkeypatch.setattr(collection, "_MIGRATION_LOCATION", str(migrations))
+    revision = migrations / "versions" / "0002_source.py"
+    script = """from alembic import op
+
+revision = "0002_source"
+down_revision = "0001_forecast_history"
+branch_labels = None
+depends_on = None
+
+def upgrade():
+    op.execute("ALTER TABLE collection_runs ADD COLUMN source TEXT DEFAULT 'espn'")
+"""
+    revision.write_text(script + '    op.execute("invalid SQL")\n')
     collection.record_collection("cfb", DAY, started, "complete", 0)
-    with closing(sqlite3.connect(tmp_path / "forecast-history.sqlite3")) as db:
-        assert db.execute("PRAGMA user_version").fetchone() == (1,)
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            "0001_forecast_history",
+        )
         assert db.execute("SELECT sport FROM collection_runs").fetchall() == [("nfl",)]
         assert "source" not in {
             column[1] for column in db.execute("PRAGMA table_info(collection_runs)")
         }
 
-    monkeypatch.setattr(collection, "_MIGRATIONS", (*migrations, (statement,)))
+    revision.write_text(script)
     collection.record_collection("cfb", DAY, started, "complete", 0)
-    with closing(sqlite3.connect(tmp_path / "forecast-history.sqlite3")) as db:
-        assert db.execute("PRAGMA user_version").fetchone() == (2,)
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0002_source",)
         assert db.execute("SELECT sport, source FROM collection_runs ORDER BY id").fetchall() == [
             ("nfl", "espn"),
             ("cfb", "espn"),
+        ]
+
+
+def test_alembic_adopts_existing_history_from_the_original_pr(tmp_path: Path) -> None:
+    started = dt.datetime.now(dt.UTC)
+    path = tmp_path / "forecast-history.sqlite3"
+    collection.record_collection("nfl", DAY, started, "complete", 0)
+    # The earlier implementation created the same tables and tracked them with user_version.
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("DROP TABLE alembic_version")
+        db.execute("PRAGMA user_version = 1")
+
+    collection.record_collection("cfb", DAY, started, "complete", 0)
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            "0001_forecast_history",
+        )
+        assert db.execute("SELECT sport FROM collection_runs ORDER BY id").fetchall() == [
+            ("nfl",),
+            ("cfb",),
         ]
