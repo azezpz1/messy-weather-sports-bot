@@ -83,7 +83,7 @@ checkout, so a failed `cd` is logged too.
 The schedule (ESPN) and weather (National Weather Service) APIs are free and
 require no credentials. Posting to Bluesky needs an
 [app password](https://bsky.app/settings/app-passwords), set via environment
-variables:
+variables. The state and history settings apply to both bots.
 
 | Env var                 | Description                                   |
 | ------------------------ | ---------------------------------------------- |
@@ -91,6 +91,7 @@ variables:
 | `BLUESKY_APP_PASSWORD`   | An app password (not your account password)     |
 | `HEALTHCHECK_URL`        | Optional [Healthchecks.io](#failure-alerting-with-healthchecksio) ping URL |
 | `MESSY_WEATHER_STATE_DIR` | Optional override for [where post state is saved](#avoiding-duplicate-posts) |
+| `MESSY_WEATHER_DB_PATH`   | Optional path to the [SQLite forecast history](#forecast-history) shared by both bots |
 
 ## Running
 
@@ -141,6 +142,33 @@ State files live at `$XDG_STATE_HOME/messy-weather-bot/<date>.json` (or
 set), overridable via `MESSY_WEATHER_STATE_DIR`. `--dry-run` never reads or
 writes this state. (The [college football bot](#college-football-top-25) keeps its
 own, beside it, as `<date>.cfb.json`.)
+
+### Forecast history
+
+The first normal run creates `forecast-history.sqlite3` automatically in the
+state directory described above. Both bots append to that same file on their
+existing schedules. The account running the bots needs write access to the
+database and its directory. To use a different location, give both bots the
+same setting in the environment their cron jobs use. For example, add this
+line to their crontab with a directory writable by the cron user.
+
+```cron
+MESSY_WEATHER_DB_PATH=/var/lib/messy-weather/forecast-history.sqlite3
+```
+
+Dry runs, including previews for other game days, leave the database untouched.
+
+The history includes supported games, venue and kickoff details, and the hourly
+forecast periods used to score each game. It records clear-weather evaluations,
+unavailable forecasts, alert lookup failures, and schedule failures. Reruns
+keep their own timestamped observations, even when the day's thread is already
+posted. The bot applies pending Alembic revisions automatically. If it cannot
+save the history, it logs a warning and continues the run.
+
+Schema revisions live in `src/messy_weather_sports_bot/migrations/versions/`.
+Use `uv run alembic revision -m "describe the schema change"` to create a revision.
+To apply pending revisions manually, run `uv run alembic upgrade head` with the
+same database settings as the bots.
 
 ### Failure alerting with Healthchecks.io
 

@@ -169,6 +169,7 @@ class EspnScoreboard:
             neutral_site=self._sport.parse_neutral_site and competition.get("neutralSite") is True,
             rankings_reported=home_reported or away_reported,
             rankings_unreadable=home_unreadable or away_unreadable,
+            espn_event_id=str(event.get("id") or competition.get("id") or "") or None,
         )
 
     def _team_label(self, competitor: dict) -> str | None:

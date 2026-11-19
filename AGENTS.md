@@ -54,6 +54,18 @@ no messy ranked game posts nothing. Never make it fall back to the NFL's credent
 file or healthcheck - it reads `CFB_`-prefixed variables only, so it can't post to the wrong
 account - and give any new sport its own `env_prefix` and `state_key` (a test enforces it).
 
+## Database changes
+
+- Add a new Alembic revision under `src/messy_weather_sports_bot/migrations/versions/`
+  for each forecast history schema change. Leave released revisions intact.
+  See [Forecast history](README.md#forecast-history) for the Alembic commands.
+- Keep upgrades transactional. Test both creating a fresh database and upgrading
+  a populated database from the previous revision. Check that existing game and
+  forecast observations survive the upgrade.
+- Keep forecast persistence best-effort. Verify the bot can still publish if
+  opening, upgrading, or writing the database fails. Dry runs leave the database
+  untouched.
+
 ## Before every push
 
 Run `./scripts/check.sh` (see README's "Development" section for the

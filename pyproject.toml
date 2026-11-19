@@ -7,8 +7,10 @@ authors = [
 ]
 requires-python = ">=3.11"
 dependencies = [
+    "alembic>=1.16",
     "atproto>=0.0.72",
     "httpx>=0.28.1",
+    "sqlalchemy>=2.0,<3",
     "tenacity>=9.1.4",
 ]
 
@@ -29,6 +31,9 @@ dev = [
     "ruff>=0.16.8",
     "ty>=0.0.82",
 ]
+
+[tool.alembic]
+script_location = "%(here)s/src/messy_weather_sports_bot/migrations"
 
 [tool.ruff]
 line-length = 100

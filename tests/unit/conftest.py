@@ -21,3 +21,8 @@ def _restore_package_logger() -> Iterator[None]:
     yield
     package_logger.handlers[:] = handlers
     package_logger.setLevel(level)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_forecast_history(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv("MESSY_WEATHER_DB_PATH", str(tmp_path / "forecast-history.sqlite3"))
