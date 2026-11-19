@@ -45,6 +45,8 @@ class Game:
     rankings_unreadable: bool = False
     """True when a team had a ranking field this bot couldn't read (not a whole number),
     which means ESPN's format changed, not that the team is unranked."""
+    espn_event_id: str | None = None
+    """ESPN's stable event ID, when present."""
 
 
 def todays_game_day(sport: Sport, now: dt.datetime | None = None) -> dt.date:

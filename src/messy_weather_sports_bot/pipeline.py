@@ -11,6 +11,7 @@ import httpx
 
 from messy_weather_sports_bot import state
 from messy_weather_sports_bot.alerts import WeatherAlert, get_active_alerts
+from messy_weather_sports_bot.collection import GameObservation, record_collection
 from messy_weather_sports_bot.espn import EspnScoreboard, VenueTableError
 from messy_weather_sports_bot.formatting import build_post_texts, format_kickoff
 from messy_weather_sports_bot.messiness import GameWeather, evaluate_game, sort_by_messiness
@@ -66,6 +67,7 @@ def _weather_detail(weather: WeatherReport) -> str:
 @dataclass
 class _Evaluation:
     evaluated: list[GameWeather] = field(default_factory=list)
+    observations: list[GameObservation] = field(default_factory=list)
     outdoor_count: int = 0
     games_missing: int = 0
     """Outdoor games whose forecast couldn't be fetched - one of them might have been
@@ -135,13 +137,32 @@ class GameDayPipeline:
         if date != today and not dry_run:
             logger.warning("Previewing %s, not today; forcing --dry-run.", date.isoformat())
             dry_run = True
+        started_at = dt.datetime.now(dt.UTC)
         try:
             games = EspnScoreboard(sport).fetch(date)
         except VenueTableError as exc:
+            if not dry_run:
+                record_collection(
+                    sport.slug,
+                    date,
+                    started_at,
+                    "venue_table_unavailable",
+                    None,
+                    error_type=type(exc).__name__,
+                )
             logger.error("Cannot run: %s", exc)
             _log_run_summary(None, _Evaluation(), [], None)
             return EXIT_NOTHING_POSTED
         except (httpx.HTTPError, ValueError) as exc:
+            if not dry_run:
+                record_collection(
+                    sport.slug,
+                    date,
+                    started_at,
+                    "schedule_unavailable",
+                    None,
+                    error_type=type(exc).__name__,
+                )
             logger.error(
                 "Could not fetch the %s schedule for %s: %s", sport.name, date.isoformat(), exc
             )
@@ -150,6 +171,25 @@ class GameDayPipeline:
 
         rankings_missing = self._rankings_missing(games)
         evaluation = self._evaluate(games)
+        if not dry_run:
+            partial = (
+                rankings_missing
+                or evaluation.games_missing > 0
+                or any(
+                    observation.alerts_error_type is not None
+                    or observation.outcome == "venue_unavailable"
+                    for observation in evaluation.observations
+                )
+            )
+            record_collection(
+                sport.slug,
+                date,
+                started_at,
+                "partial" if partial else "complete",
+                len(games),
+                evaluation.observations,
+                rankings_unavailable=rankings_missing,
+            )
         messy = evaluation.messy
 
         if evaluation.outdoor_count == 0:
@@ -247,6 +287,8 @@ class GameDayPipeline:
                 reason = skip_reason(game)
                 if reason is not None:
                     logger.info("%s — skipped: %s", matchup, reason)
+                    outcome = "venue_unavailable" if game.is_venue_drift else "skipped"
+                    evaluation.observations.append(GameObservation(game, outcome, reason))
                     continue
 
                 evaluation.outdoor_count += 1
@@ -262,9 +304,14 @@ class GameDayPipeline:
                     )
                 except (httpx.HTTPError, ValueError) as exc:
                     evaluation.games_missing += 1
+                    evaluation.observations.append(
+                        GameObservation(game, "forecast_unavailable", type(exc).__name__)
+                    )
                     logger.info("%s — skipped: forecast unavailable (%s)", matchup, exc)
                     continue
 
+                forecast_observed_at = dt.datetime.now(dt.UTC)
+                alerts_error_type = None
                 try:
                     alerts = get_active_alerts(
                         game.stadium.latitude,
@@ -276,10 +323,21 @@ class GameDayPipeline:
                 except (httpx.HTTPError, ValueError) as exc:
                     # An alert lookup failing shouldn't drop the game - the line just shows
                     # no alert and scoring falls back to the forecast alone.
+                    alerts_error_type = type(exc).__name__
                     logger.info("%s — no alert data (%s)", matchup, exc)
 
                 gw = evaluate_game(game, forecasts, alerts)
                 evaluation.evaluated.append(gw)
+                evaluation.observations.append(
+                    GameObservation(
+                        game,
+                        "evaluated",
+                        forecasts=forecasts,
+                        result=gw,
+                        alerts_error_type=alerts_error_type,
+                        observed_at=forecast_observed_at,
+                    )
+                )
                 period_word = "period" if len(forecasts) == 1 else "periods"
                 logger.info(
                     "%s %s — %s: score %.1f (%s) across %d hourly %s",

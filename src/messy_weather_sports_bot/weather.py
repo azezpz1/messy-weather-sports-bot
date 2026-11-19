@@ -40,6 +40,10 @@ class WeatherReport:
     relative_humidity: int | None = None
     """Percent relative humidity (0-100), or None if NWS didn't report one."""
 
+    starts_at: str | None = None
+    ends_at: str | None = None
+    """The timestamp bounds of this NWS period, including the provider's UTC offset."""
+
     @property
     def feels_like_f(self) -> float | None:
         """How cold or hot it actually feels: the NWS wind chill when it's cold and
@@ -189,6 +193,8 @@ def _period_to_report(period: dict) -> WeatherReport:
     humidity = (period.get("relativeHumidity", {}) or {}).get("value")
     temperature = period.get("temperature")
     return WeatherReport(
+        starts_at=period["startTime"],
+        ends_at=period["endTime"],
         short_forecast=period.get("shortForecast", ""),
         temperature_f=int(temperature) if temperature is not None else None,
         wind_speed_mph=_parse_wind_speed_mph(period.get("windSpeed") or ""),
