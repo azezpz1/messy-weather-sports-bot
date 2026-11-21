@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"historyCacheSize":0}'>
+  <title>{% block title %}Messy Weather{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  {% block scripts %}{% endblock %}
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell header-inner">
+      <a class="brand" href="{{ url_for('games', sport='nfl') }}">Messy Weather</a>
+      <nav aria-label="Dashboard">
+        <a href="{{ url_for('games', sport='nfl') }}"{% if sport == 'nfl' %} aria-current="page"{% endif %}>NFL</a>
+        <a href="{{ url_for('games', sport='cfb') }}"{% if sport == 'cfb' %} aria-current="page"{% endif %}>Top 25 CFB</a>
+        <a href="{{ url_for('tasks') }}"{% if request.endpoint in ('tasks', 'edit_schedule') %} aria-current="page"{% endif %}>Tasks</a>
+        <a href="{{ url_for('data') }}"{% if request.endpoint in ('data', 'raw_table', 'raw_row') %} aria-current="page"{% endif %}>Data</a>
+      </nav>
+    </div>
+  </header>
+  <main class="shell">{% block content %}{% endblock %}</main>
+</body>
+</html>

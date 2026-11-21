@@ -1,0 +1,35 @@
+{% extends 'base.html' %}
+{% from '_raw.html' import value %}
+{% block title %}{{ table_labels[table] }} · Messy Weather{% endblock %}
+{% block content %}
+  <a class="back" href="{{ url_for('data') }}">← Stored data</a>
+  <h1>{{ table_labels[table] }}</h1>
+  <p><code>{{ table }}</code> · {{ total }} {{ 'row' if total == 1 else 'rows' }}</p>
+  {% if rows %}
+    <div class="table-scroll" tabindex="0" aria-label="Raw table">
+      <table class="raw-table">
+        <thead>
+          <tr><th scope="col">Details</th>
+            {% for column in columns %}
+              <th scope="col"{% if column == sort %} aria-sort="{{ 'descending' if descending else 'ascending' }}"{% endif %}><a href="{{ url_for('raw_table', table=table, sort=column, direction='desc' if sort == column and not descending else 'asc') }}">{{ column }}</a></th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr><td><a href="{{ raw_row_url(table, row) }}">Open row</a></td>
+              {% for column in columns %}<td>{{ value(column, row[column]) }}</td>{% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+  {% if pages > 1 %}
+    <nav class="pager" aria-label="Table pages">
+      {% if page > 1 %}<a href="{{ url_for('raw_table', table=table, sort=sort, direction='desc' if descending else 'asc', page=page-1) }}">Previous</a>{% endif %}
+      <span>Page {{ page }} of {{ pages }}</span>
+      {% if page < pages %}<a href="{{ url_for('raw_table', table=table, sort=sort, direction='desc' if descending else 'asc', page=page+1) }}">Next</a>{% endif %}
+    </nav>
+  {% endif %}
+{% endblock %}

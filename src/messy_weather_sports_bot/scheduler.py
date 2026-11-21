@@ -74,17 +74,18 @@ def run_execution(execution: Execution, started_at: dt.datetime) -> ExecutionOut
 
 
 def run_once(sport: str | None = None) -> ExecutionOutcome | None:
-    """Run a manual refresh or the next due task if the collector is idle."""
+    """Run an explicit refresh or the oldest eligible task if the collector is idle."""
     with collector_lock() as acquired:
         if not acquired:
             return None
         now = dt.datetime.now(dt.UTC)
         scheduler_store.recover(now)
-        execution = (
-            scheduler_store.claim_due(now)
-            if sport is None
-            else scheduler_store.claim_manual(sport, now)
-        )
+        if sport is None:
+            execution = scheduler_store.claim_due(
+                now, defer_to_requests=True
+            ) or scheduler_store.claim_requested(now)
+        else:
+            execution = scheduler_store.claim_manual(sport, now)
         if execution is None:
             return None
         return run_execution(execution, now)

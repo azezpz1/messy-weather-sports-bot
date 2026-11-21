@@ -32,9 +32,12 @@ class EspnScoreboard:
     """A sport's ESPN scoreboard. `client` is optional - pass one to reuse a connection
     (or, in tests, to control transport); otherwise each fetch uses its own."""
 
-    def __init__(self, sport: Sport, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self, sport: Sport, client: httpx.Client | None = None, *, require_events: bool = False
+    ) -> None:
         self._sport = sport
         self._client = client
+        self._require_events = require_events
 
     def fetch(self, game_day: dt.date, *, include_untimed: bool = False) -> list[Game]:
         """The sport's games scheduled for `game_day` (a date in its game-day timezone).
@@ -47,7 +50,7 @@ class EspnScoreboard:
             catalog = self._sport.venue_catalog()
         except (ValueError, OSError) as exc:
             raise VenueTableError(f"the {self._sport.name} venue table: {exc}") from exc
-        events = self._events(self._get_payload(game_day))
+        events = self._events(self._get_payload(game_day), require_events=self._require_events)
         limit = self._sport.event_limit
         if limit is not None and len(events) >= limit:
             logger.warning(
@@ -90,12 +93,14 @@ class EspnScoreboard:
                 http_client.close()
 
     @staticmethod
-    def _events(payload: object) -> list:
+    def _events(payload: object, *, require_events: bool = False) -> list:
         if not isinstance(payload, dict):
             kind = type(payload).__name__
             raise ValueError(
                 f"Unexpected ESPN scoreboard response shape: expected object, got {kind}"
             )
+        if require_events and "events" not in payload:
+            raise ValueError("ESPN scoreboard response is missing 'events'")
         events = payload.get("events", [])
         if not isinstance(events, list):
             kind = type(events).__name__

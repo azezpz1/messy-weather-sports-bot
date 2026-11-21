@@ -1,0 +1,13 @@
+{% macro value(column, stored) -%}
+  {% if stored is none %}
+    <span class="null">NULL</span>
+  {% elif column in related_columns %}
+    <a href="{{ url_for('raw_row', table=related_columns[column], key=stored) }}">{{ stored }}</a>
+  {% elif column == 'sport' %}
+    <a href="{{ url_for('raw_row', table='collection_schedules', key=stored) }}">{{ stored }}</a>
+  {% elif stored == '' %}
+    <code>""</code>
+  {% else %}
+    {{ stored }}
+  {% endif %}
+{%- endmacro %}

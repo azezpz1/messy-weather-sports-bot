@@ -239,6 +239,117 @@ outcome. After resolving the problem, use `collect --sport nfl` or
 and their existing Healthchecks in place. Store the service configuration and
 runtime database outside the repository.
 
+### Private forecast dashboard
+
+The dashboard shows the collector's next seven days on separate NFL and Top 25
+CFB tabs. Sort games by messiness or kickoff, filter by date or precipitation
+type, and open a matchup for its hourly forecast and saved observations. It uses
+the same scoring rules as the publishing bots. **Tasks** manages the two
+collection schedules and manual refreshes. **Data** browses the stored forecast
+and scheduler tables in read-only mode.
+
+Run the [independent collector](#independent-forecast-collection) first to apply
+the database migrations and populate schedules. The dashboard, collector, and
+publishing jobs use the same release and local database directory. Their users
+need the appropriate permissions on that directory and its database and lock
+files. Give the dashboard and collector their own service configuration.
+
+#### Run the dashboard as a systemd service
+
+Create a dashboard environment file outside the checkout. Adapt the values to
+your installation.
+
+    MESSY_WEATHER_DB_PATH=/path/to/forecast-history.sqlite3
+    MESSY_WEATHER_DASHBOARD_HOST=dashboard.home.arpa
+    MESSY_WEATHER_DASHBOARD_SECRET=<random secret>
+
+Generate the session secret with `openssl rand -hex 32` and save it in the
+environment file. Restrict access to the file. Set the host to the exact
+hostname or LAN IP used in the browser, without an HTTPS scheme or port.
+
+Create a local `messy-weather-dashboard.service` using your service account,
+paths, and environment file.
+
+    [Unit]
+    Description=Messy weather forecast dashboard
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=<service-user>
+    WorkingDirectory=/path/to/messy-weather-sports-bot
+    EnvironmentFile=/path/to/dashboard.env
+    ExecStart=/path/to/uv run --locked messy-weather-dashboard
+    Restart=on-failure
+    RestartSec=5
+
+    [Install]
+    WantedBy=multi-user.target
+
+Enable the service after reloading systemd.
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now messy-weather-dashboard
+
+Waitress serves on `127.0.0.1:8080`. Publishing and collection continue while
+the dashboard service is stopped.
+
+#### Serve the dashboard on your home network
+
+Install Caddy with your OS package manager and choose a LAN hostname that
+resolves on both devices. A reserved LAN IP also works. Run
+`caddy hash-password` and enter your dashboard password when prompted. Keep
+the password hash and the actual Caddyfile on the server. Adapt this example
+site block to your host, interface, and credentials.
+
+    https://dashboard.home.arpa {
+        bind <pi-lan-ip>
+        tls internal
+        basic_auth {
+            <username> <password-hash>
+        }
+        reverse_proxy 127.0.0.1:8080 {
+            header_up -Authorization
+        }
+    }
+
+Caddy 2.6 and 2.7 use `basicauth` for the same directive. Caddy 2.8 and newer
+use `basic_auth`. Restrict the HTTPS port to the trusted home network in your
+host firewall.
+Validate the Caddyfile and reload the Caddy service.
+
+    sudo caddy validate --config /etc/caddy/Caddyfile
+    sudo systemctl reload caddy
+
+Caddy authenticates every browser request. Its local CA signs the dashboard
+certificate.
+
+- Transfer the CA's public root certificate from Caddy's
+  [data directory](https://caddyserver.com/docs/automatic-https#local-https)
+  to your devices. Keep the private key on the server.
+- On iPhone, install the certificate, then enable TLS trust under **Settings
+  → General → About → Certificate Trust Settings**.
+  [Apple certificate trust instructions](https://support.apple.com/en-ie/102390)
+- On desktop, add the certificate to your OS or browser trust store.
+- Open the HTTPS URL on both devices and sign in. Verify the NFL and CFB tabs
+  load, queue a refresh from **Tasks**, and open a row in **Data**.
+
+The existing release updater installs the dashboard's Python dependencies through
+uv. Stop the dashboard and collector services before updating and start the
+collector first afterward so it can apply migrations. Start the dashboard
+after the collector is ready. Caddy updates separately through the OS package
+manager. The bundled htmx asset is updated in the repository and ships with a
+normal app release.
+
+The browser tests run in CI with Chromium and an iPhone-sized WebKit viewport.
+To reproduce them on a development machine, install the browser engines and run
+the optional test group.
+
+    uv run --locked --group e2e playwright install chromium webkit
+    uv run --locked --group e2e pytest --no-cov tests/e2e
+
+Playwright's `install --with-deps` flag also installs system libraries on Linux.
+
 ### Failure alerting with Healthchecks.io
 
 The bot's own logs only help if something reads them. Since it normally runs

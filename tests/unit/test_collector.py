@@ -175,3 +175,17 @@ def test_collector_enables_application_info_without_enabling_httpx_info(monkeypa
     assert main(["schedule", "status"]) == 0
     assert app.isEnabledFor(logging.INFO)
     assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+
+
+def test_a_scoreboard_without_events_does_not_replace_the_slate_with_an_empty_day():
+    now = dt.datetime(2026, 11, 21, 18, tzinfo=dt.UTC)
+    with respx.mock:
+        respx.get(NFL.scoreboard_url).mock(
+            side_effect=[httpx.Response(200, json={}), httpx.Response(200, json={"events": []})]
+        )
+        failed, empty = (next(collector.collect_window(NFL, now)) for _ in range(2))
+
+    assert failed.outcome == "schedule_unavailable"
+    assert failed.games_found is None
+    assert empty.outcome == "complete"
+    assert empty.games_found == 0

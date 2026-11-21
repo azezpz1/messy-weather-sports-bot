@@ -9,12 +9,16 @@ requires-python = ">=3.11"
 dependencies = [
     "alembic>=1.16",
     "atproto>=0.0.72",
+    "flask>=3.1,<4",
+    "flask-wtf>=1.2,<2",
     "httpx>=0.28.1",
     "sqlalchemy>=2.0,<3",
     "tenacity>=9.1.4",
+    "waitress>=3.0.2,<4",
 ]
 
 [project.scripts]
+messy-weather-dashboard = "messy_weather_sports_bot.dashboard:main"
 messy-weather-collector = "messy_weather_sports_bot.collector_cli:main"
 messy-weather-nfl-bot = "messy_weather_sports_bot.nfl:main"
 messy-weather-cfb-bot = "messy_weather_sports_bot.cfb:main"
@@ -32,6 +36,9 @@ dev = [
     "ruff>=0.16.8",
     "ty>=0.0.82",
 ]
+e2e = [
+    "playwright>=1.52,<2",
+]
 
 [tool.alembic]
 script_location = "%(here)s/src/messy_weather_sports_bot/migrations"
@@ -47,7 +54,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
 python-version = "3.11"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests/unit", "tests/integration"]
 addopts = "--cov --cov-report=term-missing"
 markers = [
     "integration: exercises real external APIs (network required)",

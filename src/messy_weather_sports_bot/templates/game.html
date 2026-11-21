@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% from '_weather.html' import evaluation, score %}
+{% block title %}{{ observation.away_team }} at {{ observation.home_team }} · Messy Weather{% endblock %}
+{% block content %}
+  <a class="back" href="{{ url_for('games', sport=sport) }}">← {{ sport_names[sport] }} games</a>
+  <h1>{{ observation.away_team }} at {{ observation.home_team }}</h1>
+  <p>{{ observation.kickoff|timestamp(sport) }} · {{ observation.stadium_name or observation.espn_venue_name or 'Venue pending' }}</p>
+  <section class="panel snapshot" aria-label="Selected outlook">
+    <div>
+      {{ evaluation(observation) }}
+      <p class="muted">Recorded {{ observation.observed_at|timestamp(sport) }}</p>
+    </div>
+    <div class="game-score">Score {{ score(observation.score) }}</div>
+  </section>
+  <h2>Hourly forecast</h2>
+  {% if periods %}
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th scope="col">Time</th><th scope="col">Outlook</th><th scope="col">Temperature</th><th scope="col">Wind</th><th scope="col">Precipitation</th></tr></thead>
+        <tbody>
+          {% for period in periods %}
+            <tr>
+              <td>{{ period.starts_at|timestamp(sport) }}{% if period.selected %}<div class="muted">Used for score</div>{% endif %}</td>
+              <td>{{ period.short_forecast }}</td>
+              <td>{% if period.temperature_f is not none %}{{ period.temperature_f }} °F{% else %}—{% endif %}</td>
+              <td>{{ period.wind_speed_mph }} mph</td>
+              <td>{% if period.precipitation_probability is not none %}{{ period.precipitation_probability }}%{% else %}—{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="muted">No hourly periods were saved for this observation.</p>
+  {% endif %}
+  <h2>Forecast history</h2>
+  <ul class="record-list">
+    {% for past in history %}
+      <li><a href="{{ url_for('game', game_id=game.id, observation=past.id) }}"{% if past.id == observation.id %} aria-current="true"{% endif %}>{{ past.observed_at|timestamp(sport) }}</a>
+        <span>{{ weather_labels.get(past.weather_status, 'Awaiting collection') }} · Score {{ score(past.score) }}</span></li>
+    {% endfor %}
+  </ul>
+{% endblock %}

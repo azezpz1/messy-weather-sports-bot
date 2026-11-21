@@ -177,10 +177,22 @@ def test_dry_runs_and_date_previews_do_not_create_history(tmp_path: Path) -> Non
 
 
 @respx.mock
-def test_unusable_database_does_not_prevent_posting(
-    tmp_path: Path, poster: Mock, caplog: pytest.LogCaptureFixture
+@pytest.mark.parametrize("corrupt", [True, False], ids=["corrupt", "write-failure"])
+def test_database_failure_does_not_prevent_posting(
+    tmp_path: Path, poster: Mock, caplog: pytest.LogCaptureFixture, corrupt: bool
 ) -> None:
-    (tmp_path / "forecast-history.sqlite3").write_text("not a database")
+    path = tmp_path / "forecast-history.sqlite3"
+    if corrupt:
+        path.write_text("not a database")
+    else:
+        with collection.forecast_db_transaction() as db:
+            collection.migrate_forecast_db(db)
+            db.exec_driver_sql(
+                """
+                CREATE TRIGGER reject_collection BEFORE INSERT ON collection_runs
+                BEGIN SELECT RAISE(ABORT, 'storage unavailable'); END
+                """
+            )
     respx.get(NFL.scoreboard_url).respond(json={"events": [espn_event("GB", "CHI")]})
     stadium = stadium_for_team("GB")
     mock_hourly_forecast(stadium.latitude, stadium.longitude, response=rainy_period_response())
@@ -188,12 +200,17 @@ def test_unusable_database_does_not_prevent_posting(
     assert nfl_main([]) == EXIT_OK
     poster.post_thread.assert_called_once()
     assert "Could not save forecast history" in caplog.text
-    assert (tmp_path / "forecast-history.sqlite3").read_text() == "not a database"
+    if corrupt:
+        assert path.read_text() == "not a database"
+    else:
+        with closing(sqlite3.connect(path)) as db:
+            assert db.execute("SELECT COUNT(*) FROM collection_runs").fetchone() == (0,)
     assert (tmp_path / "state" / f"{DAY}.json").is_file()
 
 
+@respx.mock
 def test_schema_upgrade_keeps_history_and_rolls_back_a_failed_migration(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, poster: Mock
 ) -> None:
     started = dt.datetime.now(dt.UTC)
     path = tmp_path / "forecast-history.sqlite3"
@@ -202,11 +219,11 @@ def test_schema_upgrade_keeps_history_and_rolls_back_a_failed_migration(
     migrations = tmp_path / "migrations"
     shutil.copytree(Path(collection.__file__).with_name("migrations"), migrations)
     monkeypatch.setattr(collection, "_MIGRATION_LOCATION", str(migrations))
-    revision = migrations / "versions" / "0003_source.py"
+    revision = migrations / "versions" / "0004_source.py"
     script = """from alembic import op
 
-revision = "0003_source"
-down_revision = "0002_collection_scheduler"
+revision = "0004_source"
+down_revision = "0003_dashboard_refresh_requests"
 branch_labels = None
 depends_on = None
 
@@ -214,10 +231,15 @@ def upgrade():
     op.execute("ALTER TABLE collection_runs ADD COLUMN source TEXT DEFAULT 'espn'")
 """
     revision.write_text(script + '    op.execute("invalid SQL")\n')
-    collection.record_collection("cfb", DAY, started, "complete", 0)
+    respx.get(NFL.scoreboard_url).respond(json={"events": [espn_event("GB", "CHI")]})
+    stadium = stadium_for_team("GB")
+    mock_hourly_forecast(stadium.latitude, stadium.longitude, response=rainy_period_response())
+
+    assert nfl_main([]) == EXIT_OK
+    poster.post_thread.assert_called_once()
     with closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0002_collection_scheduler",
+            "0003_dashboard_refresh_requests",
         )
         assert db.execute("SELECT sport FROM collection_runs").fetchall() == [("nfl",)]
         assert "source" not in {
@@ -227,7 +249,7 @@ def upgrade():
     revision.write_text(script)
     collection.record_collection("cfb", DAY, started, "complete", 0)
     with closing(sqlite3.connect(path)) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0003_source",)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0004_source",)
         assert db.execute("SELECT sport, source FROM collection_runs ORDER BY id").fetchall() == [
             ("nfl", "espn"),
             ("cfb", "espn"),
@@ -256,7 +278,7 @@ def test_scheduler_migration_preserves_previous_forecast_history(
     collection.record_collection("cfb", DAY, started, "complete", 0)
     with closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0002_collection_scheduler",
+            "0003_dashboard_refresh_requests",
         )
         assert db.execute(
             "SELECT sport, execution_id FROM collection_runs ORDER BY id"
@@ -269,4 +291,57 @@ def test_scheduler_migration_preserves_previous_forecast_history(
             ("GB", "CHI")
         ]
         assert db.execute("SELECT short_forecast FROM forecast_periods").fetchall() == [("Rain",)]
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_refresh_queue_migration_preserves_scheduler_observations(tmp_path: Path) -> None:
+    started = dt.datetime(2026, 11, 21, 18, tzinfo=dt.UTC)
+    with collection.forecast_db_transaction() as db:
+        config = Config(attributes={"connection": db})
+        config.set_main_option("script_location", collection._MIGRATION_LOCATION)
+        command.upgrade(config, "0002_collection_scheduler")
+        db.exec_driver_sql(
+            """
+            INSERT INTO collection_schedules (sport, interval_seconds, enabled, next_due, revision)
+            VALUES ('nfl', 14400, 0, ?, 7)
+            """,
+            (started.isoformat(),),
+        )
+        db.exec_driver_sql(
+            """
+            INSERT INTO collection_executions (id, sport, trigger, started_at, outcome)
+            VALUES (42, 'nfl', 'scheduled', ?, 'complete')
+            """,
+            (started.isoformat(),),
+        )
+        game = Game("GB", "CHI", started, stadium_for_team("GB"), espn_event_id="123")
+        observation = collection.GameObservation(
+            game, "evaluated", forecasts=(collection.WeatherReport("Rain", 42, 5, 90),)
+        )
+        collection.insert_collection(
+            db, "nfl", DAY, started, "complete", 1, (observation,), execution_id=42
+        )
+
+    collection.record_collection("cfb", DAY, started, "complete", 0)
+    path = tmp_path / "forecast-history.sqlite3"
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
+            "0003_dashboard_refresh_requests",
+        )
+        assert db.execute("SELECT id FROM collection_refresh_requests").fetchall() == []
+        assert db.execute(
+            """
+            SELECT interval_seconds, enabled, revision FROM collection_schedules WHERE sport = 'nfl'
+            """
+        ).fetchone() == (14400, 0, 7)
+        assert db.execute(
+            """
+            SELECT e.id, e.outcome, g.espn_event_id, o.home_team, p.short_forecast
+            FROM collection_executions AS e
+            JOIN collection_runs AS r ON r.execution_id = e.id
+            JOIN game_observations AS o ON o.run_id = r.id
+            JOIN games AS g ON g.id = o.game_id
+            JOIN forecast_periods AS p ON p.observation_id = o.id
+            """
+        ).fetchall() == [(42, "complete", "123", "GB", "Rain")]
         assert db.execute("PRAGMA foreign_key_check").fetchall() == []
