@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import httpx
@@ -35,7 +36,7 @@ class WeatherReport:
     """None if NWS didn't report a temperature for this period - distinct from a measured
     0°F, which would otherwise be scored as extreme cold."""
     wind_speed_mph: float
-    precipitation_probability: int | None
+    precipitation_probability: float | None
     """Percent chance of precipitation (0-100), or None if NWS didn't report one."""
     relative_humidity: int | None = None
     """Percent relative humidity (0-100), or None if NWS didn't report one."""
@@ -122,26 +123,55 @@ def _parse_wind_speed_mph(wind_speed: str) -> float:
     return float(high or low)
 
 
-def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime) -> list[dict]:
-    """Return every forecast period overlapping [start, end).
+class ForecastHorizonError(ValueError):
+    """Valid forecast periods exist but they end before kickoff."""
 
-    Raises ValueError if none overlap - a game past the end of the forecast (~7 days
-    out) or already over. Substituting an unrelated period would report current weather
-    as the game's forecast, so callers treat it as "forecast not available"."""
+
+def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime) -> list[dict]:
+    """Return every forecast period overlapping [start, end)."""
     if not periods:
         raise ValueError("NWS returned no forecast periods")
-    covering = [
-        period
-        for period in periods
-        if dt.datetime.fromisoformat(period["startTime"]) < end
-        and dt.datetime.fromisoformat(period["endTime"]) > start
-    ]
+    covering = []
+    latest_end = None
+    for period in periods:
+        period_start = dt.datetime.fromisoformat(period["startTime"])
+        period_end = dt.datetime.fromisoformat(period["endTime"])
+        if period_start.utcoffset() is None or period_end.utcoffset() is None:
+            raise ValueError("NWS forecast period timestamps must have UTC offsets")
+        if period_end <= period_start:
+            raise ValueError("NWS forecast period ends before or at its start")
+        latest_end = period_end if latest_end is None else max(latest_end, period_end)
+        if period_start < end and period_end > start:
+            covering.append(period)
     if not covering:
-        raise ValueError(
+        error = (
+            ForecastHorizonError if latest_end is not None and latest_end <= start else ValueError
+        )
+        raise error(
             f"no forecast period covers the game window {start.isoformat()} to "
             f"{end.isoformat()} (forecast not available yet, or the game is over)"
         )
     return covering
+
+
+def covers_game(
+    reports: Sequence[WeatherReport], kickoff: dt.datetime, duration: dt.timedelta
+) -> bool:
+    """Check the union of the hourly periods for gaps across the game."""
+    intervals = sorted(
+        (dt.datetime.fromisoformat(report.starts_at), dt.datetime.fromisoformat(report.ends_at))
+        for report in reports
+        if report.starts_at is not None and report.ends_at is not None
+    )
+    covered_until = kickoff
+    end = kickoff + duration
+    for start, finish in intervals:
+        if start > covered_until:
+            return False
+        covered_until = max(covered_until, finish)
+        if covered_until >= end:
+            return True
+    return False
 
 
 def _forecast_hourly_url(points_payload: object) -> str:
@@ -153,7 +183,10 @@ def _forecast_hourly_url(points_payload: object) -> str:
         raise ValueError(
             "Unexpected NWS points response shape: missing 'properties.forecastHourly'"
         )
-    return properties["forecastHourly"]
+    url = properties["forecastHourly"]
+    if not isinstance(url, str) or not url:
+        raise ValueError("Unexpected NWS points response shape: forecastHourly must be a URL")
+    return url
 
 
 def _forecast_periods(forecast_payload: object) -> list[dict]:
@@ -185,24 +218,49 @@ def _forecast_periods(forecast_payload: object) -> list[dict]:
     return periods
 
 
+def _period_quantity(period: dict, field: str) -> object:
+    quantity = period.get(field)
+    if quantity is None:
+        return None
+    if not isinstance(quantity, dict):
+        raise ValueError(f"Unexpected NWS forecast response shape: {field} must be an object")
+    return quantity.get("value")
+
+
 def _period_to_report(period: dict) -> WeatherReport:
-    # NWS can report a null temperature/windSpeed for a period with missing data. A null
-    # temperature stays None rather than becoming a fabricated 0°F extreme-cold reading;
-    # windSpeed falls back to calm, which doesn't skew scoring the same way.
-    precip = period.get("probabilityOfPrecipitation", {}) or {}
-    humidity = (period.get("relativeHumidity", {}) or {}).get("value")
-    temperature = period.get("temperature")
+    # Missing values are expected. Keep temperatures unknown and default missing wind
+    # speeds to calm. Reject malformed fields before they reach scoring or storage.
+    wind = period.get("windSpeed")
+    if wind is not None and not isinstance(wind, str):
+        raise ValueError("Unexpected NWS forecast response shape: windSpeed must be a string")
+    summary = period.get("shortForecast", "")
+    if not isinstance(summary, str):
+        raise ValueError("Unexpected NWS forecast response shape: shortForecast must be a string")
+    precip = _period_quantity(period, "probabilityOfPrecipitation")
+    if precip is not None and (
+        not isinstance(precip, int | float) or isinstance(precip, bool) or not 0 <= precip <= 100
+    ):
+        raise ValueError(
+            "Unexpected NWS forecast response shape: invalid precipitation probability"
+        )
+    humidity = _period_quantity(period, "relativeHumidity")
+    raw_temperature = period.get("temperature")
+    try:
+        temperature = int(raw_temperature) if raw_temperature is not None else None
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("Unexpected NWS forecast response shape: invalid temperature") from exc
     return WeatherReport(
         starts_at=period["startTime"],
         ends_at=period["endTime"],
-        short_forecast=period.get("shortForecast", ""),
-        temperature_f=int(temperature) if temperature is not None else None,
-        wind_speed_mph=_parse_wind_speed_mph(period.get("windSpeed") or ""),
-        precipitation_probability=precip.get("value"),
-        # Only used for the heat index - anything but a number is treated as unreported.
+        short_forecast=summary,
+        temperature_f=temperature,
+        wind_speed_mph=_parse_wind_speed_mph(wind or ""),
+        precipitation_probability=precip,
         relative_humidity=(
             round(humidity)
-            if isinstance(humidity, int | float) and not isinstance(humidity, bool)
+            if isinstance(humidity, int | float)
+            and not isinstance(humidity, bool)
+            and 0 <= humidity <= 100
             else None
         ),
     )
@@ -233,7 +291,10 @@ def get_forecast(
         )
         forecast_url = _forecast_hourly_url(points_response.json())
 
-        forecast_response = request_with_retry(lambda: _get(forecast_url))
+        try:
+            forecast_response = request_with_retry(lambda: _get(forecast_url))
+        except httpx.InvalidURL as exc:
+            raise ValueError("NWS returned an invalid hourly forecast URL") from exc
         periods = _forecast_periods(forecast_response.json())
     finally:
         if owns_client:

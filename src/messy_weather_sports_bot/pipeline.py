@@ -10,17 +10,18 @@ from dataclasses import dataclass, field
 import httpx
 
 from messy_weather_sports_bot import state
-from messy_weather_sports_bot.alerts import WeatherAlert, get_active_alerts
-from messy_weather_sports_bot.collection import GameObservation, record_collection
+from messy_weather_sports_bot.alerts import get_active_alerts
+from messy_weather_sports_bot.collection import record_collection
 from messy_weather_sports_bot.espn import EspnScoreboard, VenueTableError
-from messy_weather_sports_bot.formatting import build_post_texts, format_kickoff
-from messy_weather_sports_bot.messiness import GameWeather, evaluate_game, sort_by_messiness
+from messy_weather_sports_bot.evaluation import Evaluation, evaluate_games, rankings_missing
+from messy_weather_sports_bot.formatting import build_post_texts
+from messy_weather_sports_bot.messiness import sort_by_messiness
 from messy_weather_sports_bot.poster import POSTERS
 from messy_weather_sports_bot.poster.base import PartialThreadError, SocialMediaPoster
 from messy_weather_sports_bot.poster.console import ConsolePoster
-from messy_weather_sports_bot.schedule import Game, skip_reason, todays_game_day
+from messy_weather_sports_bot.schedule import todays_game_day
 from messy_weather_sports_bot.sport import Sport
-from messy_weather_sports_bot.weather import USER_AGENT, WeatherReport, get_forecast
+from messy_weather_sports_bot.weather import get_forecast
 
 logger = logging.getLogger(__name__)
 
@@ -29,11 +30,6 @@ logger = logging.getLogger(__name__)
 EXIT_OK = 0
 EXIT_NOTHING_POSTED = 1
 EXIT_PARTIAL = 2
-
-RANKINGS_CHECK_MIN_GAMES = 8
-"""A slate this big with no ranking field on any game isn't an unranked slate - ESPN sends
-every team one (99 when unranked) - so rankings stopped arriving, and a run that filters
-on them would quietly never post."""
 
 
 def build_posters(
@@ -55,29 +51,6 @@ def build_posters(
     return posters
 
 
-def _weather_detail(weather: WeatherReport) -> str:
-    parts = [weather.short_forecast]
-    if weather.temperature_f is not None:
-        parts.append(f"{weather.temperature_f}°F")
-    if weather.wind_speed_mph > 0:
-        parts.append(f"{weather.wind_speed_mph:g}mph")
-    return ", ".join(parts)
-
-
-@dataclass
-class _Evaluation:
-    evaluated: list[GameWeather] = field(default_factory=list)
-    observations: list[GameObservation] = field(default_factory=list)
-    outdoor_count: int = 0
-    games_missing: int = 0
-    """Outdoor games whose forecast couldn't be fetched - one of them might have been
-    the messy one, so a run that skipped any isn't a clean one."""
-
-    @property
-    def messy(self) -> list[GameWeather]:
-        return [gw for gw in self.evaluated if gw.is_messy]
-
-
 @dataclass
 class _Publication:
     platforms_posted: list[str] = field(default_factory=list)
@@ -88,12 +61,12 @@ class _Publication:
 
 def _log_run_summary(
     games_found: int | None,
-    evaluation: _Evaluation,
+    evaluation: Evaluation,
     platforms_posted: list[str],
     thread_root: str | None,
 ) -> None:
     """`games_found` is None when the schedule couldn't be fetched at all (pass an empty
-    `_Evaluation`) - every other exit path from `run()` calls this, so the healthcheck
+    `Evaluation`) - every other exit path from `run()` calls this, so the healthcheck
     completion body always carries a summary line."""
     logger.info(
         "Run summary: %s game(s) found, %d outdoor, %d evaluated, %d messy, platforms: %s%s",
@@ -151,7 +124,7 @@ class GameDayPipeline:
                     error_type=type(exc).__name__,
                 )
             logger.error("Cannot run: %s", exc)
-            _log_run_summary(None, _Evaluation(), [], None)
+            _log_run_summary(None, Evaluation(), [], None)
             return EXIT_NOTHING_POSTED
         except (httpx.HTTPError, ValueError) as exc:
             if not dry_run:
@@ -166,14 +139,14 @@ class GameDayPipeline:
             logger.error(
                 "Could not fetch the %s schedule for %s: %s", sport.name, date.isoformat(), exc
             )
-            _log_run_summary(None, _Evaluation(), [], None)
+            _log_run_summary(None, Evaluation(), [], None)
             return EXIT_NOTHING_POSTED
 
-        rankings_missing = self._rankings_missing(games)
-        evaluation = self._evaluate(games)
+        missing_rankings = rankings_missing(sport, games)
+        evaluation = evaluate_games(sport, games, get_forecast, get_active_alerts)
         if not dry_run:
             partial = (
-                rankings_missing
+                missing_rankings
                 or evaluation.games_missing > 0
                 or any(
                     observation.alerts_error_type is not None
@@ -188,7 +161,7 @@ class GameDayPipeline:
                 "partial" if partial else "complete",
                 len(games),
                 evaluation.observations,
-                rankings_unavailable=rankings_missing,
+                rankings_unavailable=missing_rankings,
             )
         messy = evaluation.messy
 
@@ -197,7 +170,7 @@ class GameDayPipeline:
             _log_run_summary(len(games), evaluation, [], None)
             # With no rankings every game is filtered out, which is how a response change
             # would otherwise pass for a quiet day.
-            return EXIT_PARTIAL if rankings_missing else EXIT_OK
+            return EXIT_PARTIAL if missing_rankings else EXIT_OK
 
         if not evaluation.evaluated:
             logger.error(
@@ -241,115 +214,6 @@ class GameDayPipeline:
             len(games), evaluation, publication.platforms_posted, publication.thread_root
         )
         return exit_code
-
-    def _rankings_missing(self, games: list[Game]) -> bool:
-        """Whether a sport that reads rankings can't rely on them today: ESPN sent none on a
-        slate big enough to have them, or sent some this bot can't read. Either means its
-        response changed, and a filter on rankings would quietly drop games. Warns once;
-        the caller turns "nothing to post" into a degraded run rather than a clean one."""
-        if not self.sport.parse_rankings:
-            return False
-        unreadable = sum(game.rankings_unreadable for game in games)
-        if unreadable:
-            logger.warning(
-                "ESPN sent a ranking this bot can't read for %d of the %d games on this slate; "
-                "its response may have changed.",
-                unreadable,
-                len(games),
-            )
-            return True
-        if len(games) >= RANKINGS_CHECK_MIN_GAMES and not any(
-            game.rankings_reported for game in games
-        ):
-            logger.warning(
-                "ESPN reported no rankings for any of the %d games on this slate, so a ranking "
-                "filter would drop them all; its response may have changed.",
-                len(games),
-            )
-            return True
-        return False
-
-    def _evaluate(self, games: list[Game]) -> _Evaluation:
-        """Look up the weather for every game that applies it to, and score it."""
-        sport = self.sport
-        evaluation = _Evaluation()
-        # One client for the whole slate, so the NWS connection is reused across games.
-        with httpx.Client(timeout=10.0, headers={"User-Agent": USER_AGENT}) as nws_client:
-            for game in games:
-                matchup = f"{game.away_team} @ {game.home_team}"
-                if sport.game_filter is not None:
-                    # Before any venue or weather work: a game the sport doesn't cover costs
-                    # nothing, and is only worth a line when someone asks for the detail.
-                    filtered = sport.game_filter(game)
-                    if filtered is not None:
-                        logger.debug("%s — skipped: %s", matchup, filtered)
-                        continue
-                reason = skip_reason(game)
-                if reason is not None:
-                    logger.info("%s — skipped: %s", matchup, reason)
-                    outcome = "venue_unavailable" if game.is_venue_drift else "skipped"
-                    evaluation.observations.append(GameObservation(game, outcome, reason))
-                    continue
-
-                evaluation.outdoor_count += 1
-                assert game.stadium is not None  # guaranteed by skip_reason() returning None
-                alerts: list[WeatherAlert] = []
-                try:
-                    forecasts = get_forecast(
-                        game.stadium.latitude,
-                        game.stadium.longitude,
-                        game.kickoff,
-                        nws_client,
-                        game_duration=sport.game_duration,
-                    )
-                except (httpx.HTTPError, ValueError) as exc:
-                    evaluation.games_missing += 1
-                    evaluation.observations.append(
-                        GameObservation(game, "forecast_unavailable", type(exc).__name__)
-                    )
-                    logger.info("%s — skipped: forecast unavailable (%s)", matchup, exc)
-                    continue
-
-                forecast_observed_at = dt.datetime.now(dt.UTC)
-                alerts_error_type = None
-                try:
-                    alerts = get_active_alerts(
-                        game.stadium.latitude,
-                        game.stadium.longitude,
-                        game.kickoff,
-                        nws_client,
-                        game_duration=sport.game_duration,
-                    )
-                except (httpx.HTTPError, ValueError) as exc:
-                    # An alert lookup failing shouldn't drop the game - the line just shows
-                    # no alert and scoring falls back to the forecast alone.
-                    alerts_error_type = type(exc).__name__
-                    logger.info("%s — no alert data (%s)", matchup, exc)
-
-                gw = evaluate_game(game, forecasts, alerts)
-                evaluation.evaluated.append(gw)
-                evaluation.observations.append(
-                    GameObservation(
-                        game,
-                        "evaluated",
-                        forecasts=forecasts,
-                        result=gw,
-                        alerts_error_type=alerts_error_type,
-                        observed_at=forecast_observed_at,
-                    )
-                )
-                period_word = "period" if len(forecasts) == 1 else "periods"
-                logger.info(
-                    "%s %s — %s: score %.1f (%s) across %d hourly %s",
-                    matchup,
-                    format_kickoff(game.kickoff, sport),
-                    "included" if gw.is_messy else "skipped: not messy",
-                    gw.score,
-                    _weather_detail(gw.weather),
-                    len(forecasts),
-                    period_word,
-                )
-        return evaluation
 
     def _publish(
         self,

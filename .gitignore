@@ -224,4 +224,5 @@ __marimo__/
 *.sqlite3-*
 *.db
 *.db-*
+*.collector.lock
 .env.*

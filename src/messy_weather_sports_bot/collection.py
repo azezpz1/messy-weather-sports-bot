@@ -42,11 +42,15 @@ class GameObservation:
     observed_at: dt.datetime = field(default_factory=lambda: dt.datetime.now(dt.UTC))
 
 
+def forecast_db_path() -> Path:
+    override = os.environ.get(DB_PATH_ENV_VAR)
+    return Path(override) if override else state.default_state_dir() / "forecast-history.sqlite3"
+
+
 @contextmanager
 def forecast_db_transaction() -> Generator[Connection]:
     """Open and lock the database before inspecting or changing the schema."""
-    override = os.environ.get(DB_PATH_ENV_VAR)
-    path = Path(override) if override else state.default_state_dir() / "forecast-history.sqlite3"
+    path = forecast_db_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     engine = create_engine(
         URL.create("sqlite", database=str(path)),
@@ -61,7 +65,7 @@ def forecast_db_transaction() -> Generator[Connection]:
         yield db
 
 
-def _migrate(db: Connection) -> None:
+def migrate_forecast_db(db: Connection) -> None:
     config = Config(attributes={"connection": db})
     config.set_main_option("script_location", _MIGRATION_LOCATION.replace("%", "%%"))
     command.upgrade(config, "head")
@@ -81,31 +85,59 @@ def record_collection(
     """Append one collection run atomically, without affecting its publishing outcome."""
     try:
         with forecast_db_transaction() as db:
-            _migrate(db)
-            run = db.exec_driver_sql(
-                """
-                INSERT INTO collection_runs (
-                    sport, game_day, started_at, collected_at, outcome, games_found,
-                    rankings_unavailable, error_type
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    sport,
-                    game_day.isoformat(),
-                    _timestamp(started_at),
-                    _timestamp(dt.datetime.now(dt.UTC)),
-                    outcome,
-                    games_found,
-                    rankings_unavailable,
-                    error_type,
-                ),
+            migrate_forecast_db(db)
+            insert_collection(
+                db,
+                sport,
+                game_day,
+                started_at,
+                outcome,
+                games_found,
+                observations,
+                rankings_unavailable=rankings_unavailable,
+                error_type=error_type,
             )
-            for observation in observations:
-                _insert_observation(db, run.lastrowid, sport, game_day, observation)
     except Exception as exc:  # isolate storage and serialization failures from publishing
         cause = exc.orig if isinstance(exc, DBAPIError) else exc
         error = getattr(cause, "sqlite_errorname", type(cause).__name__)
         logger.warning("Could not save forecast history (%s).", error)
+
+
+def insert_collection(
+    db: Connection,
+    sport: str,
+    game_day: dt.date,
+    started_at: dt.datetime,
+    outcome: RunOutcome,
+    games_found: int | None,
+    observations: Sequence[GameObservation] = (),
+    *,
+    rankings_unavailable: bool = False,
+    error_type: str | None = None,
+    execution_id: int | None = None,
+) -> None:
+    """Write one day's result inside the caller's transaction."""
+    run = db.exec_driver_sql(
+        """
+        INSERT INTO collection_runs (
+            sport, game_day, started_at, collected_at, outcome, games_found,
+            rankings_unavailable, error_type, execution_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            sport,
+            game_day.isoformat(),
+            _timestamp(started_at),
+            _timestamp(dt.datetime.now(dt.UTC)),
+            outcome,
+            games_found,
+            rankings_unavailable,
+            error_type,
+            execution_id,
+        ),
+    )
+    for observation in observations:
+        _insert_observation(db, run.lastrowid, sport, game_day, observation)
 
 
 def _timestamp(value: dt.datetime | None) -> str | None:
