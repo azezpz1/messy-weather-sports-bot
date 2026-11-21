@@ -170,6 +170,75 @@ Use `uv run alembic revision -m "describe the schema change"` to create a revisi
 To apply pending revisions manually, run `uv run alembic upgrade head` with the
 same database settings as the bots.
 
+### Independent forecast collection
+
+`messy-weather-collector` refreshes upcoming NFL and Top 25 college football
+games and saves forecasts to the shared SQLite history. It looks ahead seven
+days, records available hourly periods for eligible outdoor games, and keeps
+earlier snapshots when forecasts or kickoffs change. Empty slates and games
+beyond the available forecast horizon are expected. Failed lookups and
+incomplete game forecasts are recorded separately. Collection never posts,
+reads posting credentials, or updates publication state.
+
+The worker runs year-round, every six hours per sport by default. It keeps
+schedule settings in SQLite. After downtime, it runs each overdue schedule
+once and skips older slots. One collection runs at a time, including manual
+refreshes. A restart marks an abandoned run as interrupted and retains any
+dates already saved. Schedule edits apply while the worker runs.
+
+Run these commands as the collector user with the same database setting as
+the service:
+
+```sh
+uv run messy-weather-collector schedule status
+uv run messy-weather-collector schedule set-interval nfl 4
+uv run messy-weather-collector schedule pause cfb
+uv run messy-weather-collector schedule resume cfb
+uv run messy-weather-collector collect --sport nfl
+```
+
+Changing an interval schedules the next run that many hours from the edit.
+Resuming a paused sport makes it due immediately. A manual refresh leaves
+the recurring schedule on its existing cadence.
+
+On a Raspberry Pi with systemd, create a local
+`/etc/systemd/system/messy-weather-collector.service` using this example.
+Replace the user and paths with those on your Pi. Use the same app version
+and database path for the collector and both publishing bots. The user must
+be able to write to the database and its parent directory.
+
+```ini
+[Unit]
+Description=Messy weather forecast collector
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=collector
+WorkingDirectory=/path/to/messy-weather-sports-bot
+Environment=MESSY_WEATHER_DB_PATH=/var/lib/messy-weather/forecast-history.sqlite3
+ExecStart=/path/to/uv run --locked messy-weather-collector worker
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now messy-weather-collector.service
+systemctl status messy-weather-collector.service
+journalctl -u messy-weather-collector.service -n 50
+```
+
+If a run fails, check the journal and `schedule status` for the recorded
+outcome. After resolving the problem, use `collect --sport nfl` or
+`collect --sport cfb` to refresh immediately. Keep the publishing cron entries
+and their existing Healthchecks in place. Store the service configuration and
+runtime database outside the repository.
+
 ### Failure alerting with Healthchecks.io
 
 The bot's own logs only help if something reads them. Since it normally runs

@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 
 import httpx
@@ -122,26 +123,55 @@ def _parse_wind_speed_mph(wind_speed: str) -> float:
     return float(high or low)
 
 
-def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime) -> list[dict]:
-    """Return every forecast period overlapping [start, end).
+class ForecastHorizonError(ValueError):
+    """Valid forecast periods exist but they end before kickoff."""
 
-    Raises ValueError if none overlap - a game past the end of the forecast (~7 days
-    out) or already over. Substituting an unrelated period would report current weather
-    as the game's forecast, so callers treat it as "forecast not available"."""
+
+def _periods_in_window(periods: list[dict], start: dt.datetime, end: dt.datetime) -> list[dict]:
+    """Return every forecast period overlapping [start, end)."""
     if not periods:
         raise ValueError("NWS returned no forecast periods")
-    covering = [
-        period
-        for period in periods
-        if dt.datetime.fromisoformat(period["startTime"]) < end
-        and dt.datetime.fromisoformat(period["endTime"]) > start
-    ]
+    covering = []
+    latest_end = None
+    for period in periods:
+        period_start = dt.datetime.fromisoformat(period["startTime"])
+        period_end = dt.datetime.fromisoformat(period["endTime"])
+        if period_start.utcoffset() is None or period_end.utcoffset() is None:
+            raise ValueError("NWS forecast period timestamps must have UTC offsets")
+        if period_end <= period_start:
+            raise ValueError("NWS forecast period ends before or at its start")
+        latest_end = period_end if latest_end is None else max(latest_end, period_end)
+        if period_start < end and period_end > start:
+            covering.append(period)
     if not covering:
-        raise ValueError(
+        error = (
+            ForecastHorizonError if latest_end is not None and latest_end <= start else ValueError
+        )
+        raise error(
             f"no forecast period covers the game window {start.isoformat()} to "
             f"{end.isoformat()} (forecast not available yet, or the game is over)"
         )
     return covering
+
+
+def covers_game(
+    reports: Sequence[WeatherReport], kickoff: dt.datetime, duration: dt.timedelta
+) -> bool:
+    """Check the union of the hourly periods for gaps across the game."""
+    intervals = sorted(
+        (dt.datetime.fromisoformat(report.starts_at), dt.datetime.fromisoformat(report.ends_at))
+        for report in reports
+        if report.starts_at is not None and report.ends_at is not None
+    )
+    covered_until = kickoff
+    end = kickoff + duration
+    for start, finish in intervals:
+        if start > covered_until:
+            return False
+        covered_until = max(covered_until, finish)
+        if covered_until >= end:
+            return True
+    return False
 
 
 def _forecast_hourly_url(points_payload: object) -> str:

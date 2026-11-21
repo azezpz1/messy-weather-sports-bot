@@ -15,6 +15,7 @@ dependencies = [
 ]
 
 [project.scripts]
+messy-weather-collector = "messy_weather_sports_bot.collector_cli:main"
 messy-weather-nfl-bot = "messy_weather_sports_bot.nfl:main"
 messy-weather-cfb-bot = "messy_weather_sports_bot.cfb:main"
 

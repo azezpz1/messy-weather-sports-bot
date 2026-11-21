@@ -8,6 +8,8 @@ from unittest.mock import Mock
 import httpx
 import pytest
 import respx
+from alembic import command
+from alembic.config import Config
 
 from messy_weather_sports_bot import collection
 from messy_weather_sports_bot.cfb import CFB, cfb_catalog
@@ -16,6 +18,7 @@ from messy_weather_sports_bot.nfl import NFL
 from messy_weather_sports_bot.nfl import main as nfl_main
 from messy_weather_sports_bot.pipeline import EXIT_NOTHING_POSTED, EXIT_OK, EXIT_PARTIAL
 from messy_weather_sports_bot.poster.base import PostRef, SocialMediaPoster
+from messy_weather_sports_bot.schedule import Game
 from messy_weather_sports_bot.stadiums import stadium_for_team
 from messy_weather_sports_bot.weather import nws_point
 from tests.support.espn import cfb_event, espn_event
@@ -199,11 +202,11 @@ def test_schema_upgrade_keeps_history_and_rolls_back_a_failed_migration(
     migrations = tmp_path / "migrations"
     shutil.copytree(Path(collection.__file__).with_name("migrations"), migrations)
     monkeypatch.setattr(collection, "_MIGRATION_LOCATION", str(migrations))
-    revision = migrations / "versions" / "0002_source.py"
+    revision = migrations / "versions" / "0003_source.py"
     script = """from alembic import op
 
-revision = "0002_source"
-down_revision = "0001_forecast_history"
+revision = "0003_source"
+down_revision = "0002_collection_scheduler"
 branch_labels = None
 depends_on = None
 
@@ -214,7 +217,7 @@ def upgrade():
     collection.record_collection("cfb", DAY, started, "complete", 0)
     with closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0001_forecast_history",
+            "0002_collection_scheduler",
         )
         assert db.execute("SELECT sport FROM collection_runs").fetchall() == [("nfl",)]
         assert "source" not in {
@@ -224,28 +227,46 @@ def upgrade():
     revision.write_text(script)
     collection.record_collection("cfb", DAY, started, "complete", 0)
     with closing(sqlite3.connect(path)) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0002_source",)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0003_source",)
         assert db.execute("SELECT sport, source FROM collection_runs ORDER BY id").fetchall() == [
             ("nfl", "espn"),
             ("cfb", "espn"),
         ]
 
 
-def test_alembic_adopts_existing_history_from_the_original_pr(tmp_path: Path) -> None:
+@pytest.mark.parametrize("legacy", [False, True])
+def test_scheduler_migration_preserves_previous_forecast_history(
+    tmp_path: Path, legacy: bool
+) -> None:
     started = dt.datetime.now(dt.UTC)
     path = tmp_path / "forecast-history.sqlite3"
-    collection.record_collection("nfl", DAY, started, "complete", 0)
-    # The earlier implementation created the same tables and tracked them with user_version.
-    with closing(sqlite3.connect(path)) as db, db:
-        db.execute("DROP TABLE alembic_version")
-        db.execute("PRAGMA user_version = 1")
+    game = Game("GB", "CHI", started, stadium_for_team("GB"), espn_event_id="123")
+    observation = collection.GameObservation(
+        game, "evaluated", forecasts=(collection.WeatherReport("Rain", 42, 5, 90),)
+    )
+    collection.record_collection("nfl", DAY, started, "complete", 1, (observation,))
+    with collection.forecast_db_transaction() as db:
+        config = Config(attributes={"connection": db})
+        config.set_main_option("script_location", collection._MIGRATION_LOCATION)
+        command.downgrade(config, "0001_forecast_history")
+        if legacy:
+            db.exec_driver_sql("DROP TABLE alembic_version")
+            db.exec_driver_sql("PRAGMA user_version = 1")
 
     collection.record_collection("cfb", DAY, started, "complete", 0)
     with closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0001_forecast_history",
+            "0002_collection_scheduler",
         )
-        assert db.execute("SELECT sport FROM collection_runs ORDER BY id").fetchall() == [
-            ("nfl",),
-            ("cfb",),
+        assert db.execute(
+            "SELECT sport, execution_id FROM collection_runs ORDER BY id"
+        ).fetchall() == [
+            ("nfl", None),
+            ("cfb", None),
         ]
+        assert db.execute("SELECT espn_event_id FROM games").fetchall() == [("123",)]
+        assert db.execute("SELECT home_team, away_team FROM game_observations").fetchall() == [
+            ("GB", "CHI")
+        ]
+        assert db.execute("SELECT short_forecast FROM forecast_periods").fetchall() == [("Rain",)]
+        assert db.execute("PRAGMA foreign_key_check").fetchall() == []
