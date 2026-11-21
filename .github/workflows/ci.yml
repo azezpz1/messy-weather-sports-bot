@@ -87,6 +87,11 @@ jobs:
       - name: Install test dependencies
         run: uv sync --locked --group e2e
 
+      - name: Install Caddy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends caddy
+
       - name: Install Chromium and WebKit
         run: uv run --locked --group e2e playwright install --with-deps chromium webkit
 

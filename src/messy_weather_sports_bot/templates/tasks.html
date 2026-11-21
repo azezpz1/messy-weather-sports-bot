@@ -1,6 +1,9 @@
 {% extends 'base.html' %}
 {% block title %}Collection tasks · Messy Weather{% endblock %}
-{% block scripts %}<script defer src="{{ url_for('static', filename='vendor/htmx-2.0.11.min.js') }}"></script>{% endblock %}
+{% block scripts %}
+  <script defer src="{{ url_for('static', filename='vendor/htmx-2.0.11.min.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='task-history.js') }}"></script>
+{% endblock %}
 {% block content %}
   <h1>Collection tasks</h1>
   {% if not schedules %}<p class="notice">Start the collector to initialize the schedules.</p>{% endif %}

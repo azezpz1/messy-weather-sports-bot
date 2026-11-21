@@ -30,14 +30,18 @@ class VenueTableError(Exception):
 
 class EspnScoreboard:
     """A sport's ESPN scoreboard. `client` is optional - pass one to reuse a connection
-    (or, in tests, to control transport); otherwise each fetch uses its own."""
+    (or, in tests, to control transport); otherwise each fetch uses its own.
+
+    `verify_slate` lets the collector detect incomplete responses before replacing a
+    saved slate. An explicitly untimed game or a game on another date is still skipped.
+    """
 
     def __init__(
-        self, sport: Sport, client: httpx.Client | None = None, *, require_events: bool = False
+        self, sport: Sport, client: httpx.Client | None = None, *, verify_slate: bool = False
     ) -> None:
         self._sport = sport
         self._client = client
-        self._require_events = require_events
+        self._verify_slate = verify_slate
 
     def fetch(self, game_day: dt.date, *, include_untimed: bool = False) -> list[Game]:
         """The sport's games scheduled for `game_day` (a date in its game-day timezone).
@@ -50,7 +54,7 @@ class EspnScoreboard:
             catalog = self._sport.venue_catalog()
         except (ValueError, OSError) as exc:
             raise VenueTableError(f"the {self._sport.name} venue table: {exc}") from exc
-        events = self._events(self._get_payload(game_day), require_events=self._require_events)
+        events = self._events(self._get_payload(game_day))
         limit = self._sport.event_limit
         if limit is not None and len(events) >= limit:
             logger.warning(
@@ -92,14 +96,13 @@ class EspnScoreboard:
             if owns_client:
                 http_client.close()
 
-    @staticmethod
-    def _events(payload: object, *, require_events: bool = False) -> list:
+    def _events(self, payload: object) -> list:
         if not isinstance(payload, dict):
             kind = type(payload).__name__
             raise ValueError(
                 f"Unexpected ESPN scoreboard response shape: expected object, got {kind}"
             )
-        if require_events and "events" not in payload:
+        if self._verify_slate and "events" not in payload:
             raise ValueError("ESPN scoreboard response is missing 'events'")
         events = payload.get("events", [])
         if not isinstance(events, list):
@@ -114,6 +117,8 @@ class EspnScoreboard:
     ) -> Game | None:
         competitions = event.get("competitions") or []
         if not competitions:
+            if self._verify_slate:
+                raise ValueError("ESPN scoreboard event is missing a competition")
             return None
         competition = competitions[0]
         label = event.get("shortName") or event.get("name") or event.get("id")
@@ -126,6 +131,8 @@ class EspnScoreboard:
         try:
             event_day = self._sport.game_day_for(kickoff)
         except ValueError:
+            if self._verify_slate:
+                raise
             # A kickoff with no UTC offset is rejected rather than assumed to be in this
             # machine's timezone, which could put the game on the wrong day. Skip just
             # this event (and say which), so one odd entry doesn't cost the whole slate.
@@ -143,11 +150,15 @@ class EspnScoreboard:
         home = next((c for c in competitors if c.get("homeAway") == "home"), None)
         away = next((c for c in competitors if c.get("homeAway") == "away"), None)
         if home is None or away is None:
+            if self._verify_slate:
+                raise ValueError("ESPN scoreboard competition is missing a competitor")
             return None
 
         home_team = self._team_label(home)
         away_team = self._team_label(away)
         if home_team is None or away_team is None:
+            if self._verify_slate:
+                raise ValueError("ESPN scoreboard competitor is missing a team label")
             fields = ", ".join(self._sport.team_label_fields)
             logger.warning("Skipping ESPN event %r: a team has none of %s", label, fields)
             return None
@@ -194,8 +205,11 @@ class EspnScoreboard:
         it sent one this bot can't read). ESPN gives an unranked team 99, so only a real
         integer 1-25 counts as ranked; a bool is an int in Python but never a ranking. A
         sport that doesn't read rankings gets (None, False, False)."""
-        if not self._sport.parse_rankings or "curatedRank" not in competitor:
+        if not self._sport.parse_rankings:
             return None, False, False
+        if "curatedRank" not in competitor:
+            # A verified slate requires an explicit value from each team, including 99.
+            return None, False, self._verify_slate
         curated = competitor["curatedRank"]
         current = curated.get("current") if isinstance(curated, dict) else None
         if isinstance(current, bool) or not isinstance(current, int):

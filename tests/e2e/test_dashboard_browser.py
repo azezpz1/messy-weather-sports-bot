@@ -118,10 +118,21 @@ def test_filter_games_and_manage_a_refresh(dashboard_url, engine, device):
             schedule.get_by_role("button", name="Refresh now").click()
             status = page.locator("#run-status")
             expect(status.get_by_text("Queued", exact=True)).to_be_visible()
+            details = status.locator("details").first
+            summary = details.locator("summary")
+            summary.click()
+            summary.focus()
+            expect(details).to_have_attribute("open", "")
+            opened_id = details.get_attribute("id")
             assert scheduler.run_once() == "complete"
             expect(status.get_by_text("Complete", exact=True)).to_be_visible(timeout=15_000)
             assert status_requests >= 2
             assert status.get_attribute("hx-trigger") is None
+            # Preserve the exact execution opened before the refresh changed the list order.
+            opened = status.locator("details[open]")
+            expect(opened).to_have_count(1)
+            assert opened.get_attribute("id") == opened_id
+            expect(opened.locator("summary")).to_be_focused()
 
             page.get_by_role("link", name="Data", exact=True).click()
             page.get_by_role("link", name="Hourly forecast periods").click()

@@ -36,7 +36,7 @@ def collect_window(sport: Sport, now: dt.datetime) -> Iterator[CollectedDay]:
     game_day = sport.game_day_for(now)
     last_day = sport.game_day_for(end - dt.timedelta(microseconds=1))
     with httpx.Client(timeout=10.0) as client:
-        scoreboard = EspnScoreboard(sport, client, require_events=True)
+        scoreboard = EspnScoreboard(sport, client, verify_slate=True)
         while game_day <= last_day:
             yield _collect_day(sport, scoreboard, game_day, now, end)
             game_day += dt.timedelta(days=1)

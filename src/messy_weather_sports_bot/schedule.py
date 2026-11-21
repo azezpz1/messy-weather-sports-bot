@@ -43,8 +43,7 @@ class Game:
     """True when ESPN sent a readable ranking for this game's teams - ranked or not - so a
     run can tell "nobody is ranked" from "ESPN stopped sending rankings"."""
     rankings_unreadable: bool = False
-    """True when a team had a ranking field this bot couldn't read (not a whole number),
-    which means ESPN's format changed, not that the team is unranked."""
+    """True when a ranking field is malformed or missing during strict slate verification."""
     espn_event_id: str | None = None
     """ESPN's stable event ID, when present."""
 

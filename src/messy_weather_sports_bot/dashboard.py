@@ -8,6 +8,7 @@ import logging
 import os
 import sqlite3
 from collections.abc import Sequence
+from pathlib import Path
 from typing import cast
 
 from flask import Flask, Response, abort, redirect, render_template, request, url_for
@@ -24,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 SECRET_ENV = "MESSY_WEATHER_DASHBOARD_SECRET"
 HOST_ENV = "MESSY_WEATHER_DASHBOARD_HOST"
+DEFAULT_SOCKET = Path("/run/messy-weather-dashboard/dashboard.sock")
+MAX_REQUEST_BODY_SIZE = 8 * 1024
 MAX_HOURS = scheduler_store.MAX_INTERVAL_SECONDS // 3600
 SPORT_NAMES = {"nfl": "NFL", "cfb": "Top 25 CFB"}
 PRECIP_LABELS = {
@@ -109,7 +112,7 @@ def create_app(secret_key: str, *, trusted_host: str | None = None) -> Flask:
         SECRET_KEY=secret_key,
         SESSION_COOKIE_SECURE=True,
         SESSION_COOKIE_SAMESITE="Strict",
-        MAX_CONTENT_LENGTH=8 * 1024,
+        MAX_CONTENT_LENGTH=MAX_REQUEST_BODY_SIZE,
         TRUSTED_HOSTS=[trusted_host] if trusted_host else None,
     )
     CSRFProtect(app)
@@ -303,10 +306,10 @@ def create_app(secret_key: str, *, trusted_host: str | None = None) -> Flask:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--socket", type=Path, default=DEFAULT_SOCKET)
     args = parser.parse_args(argv)
-    if not 1024 <= args.port <= 65535:
-        parser.error("--port must be between 1024 and 65535")
+    if not args.socket.is_absolute():
+        parser.error("--socket must be an absolute path")
     secret = os.environ.get(SECRET_ENV, "")
     if len(secret) < 32:
         parser.error(f"Set {SECRET_ENV} to a random value of at least 32 characters")
@@ -314,12 +317,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not host:
         parser.error(f"Set {HOST_ENV} to the HTTPS proxy's hostname or IP address")
     app = create_app(secret, trusted_host=host)
-    # Waitress listens on loopback. Trust only the scheme from the local proxy.
+    # Only the proxy group may connect. Waitress calls Unix socket peers "localhost".
     serve(
         app,
-        host="127.0.0.1",
-        port=args.port,
-        trusted_proxy="127.0.0.1",
+        unix_socket=str(args.socket),
+        unix_socket_perms="660",
+        trusted_proxy="localhost",
         trusted_proxy_headers={"x-forwarded-proto"},
+        max_request_body_size=MAX_REQUEST_BODY_SIZE,
     )
     return 0

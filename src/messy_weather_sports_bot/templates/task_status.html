@@ -30,13 +30,13 @@
     <ul class="record-list">
       {% for execution in executions %}
         <li>
-          <details>
-            <summary>{{ sport_names[execution.sport] }} · {{ execution.outcome|capitalize }} · {{ execution.started_at|timestamp(execution.sport) }}</summary>
+          <details id="execution-{{ execution.id }}">
+            <summary id="execution-{{ execution.id }}-summary">{{ sport_names[execution.sport] }} · {{ execution.outcome|capitalize }} · {{ execution.started_at|timestamp(execution.sport) }}</summary>
             <p>{{ execution.trigger|capitalize }} · {{ execution.days|length }} {{ 'date' if execution.days|length == 1 else 'dates' }} processed{% if execution.finished_at %} · Finished {{ execution.finished_at|timestamp(execution.sport) }}{% endif %}</p>
             {% if execution.failure_summary %}<p>{{ execution.failure_summary }}</p>{% endif %}
             <ul>
               {% for day in execution.days %}
-                <li><a href="{{ url_for('raw_row', table='collection_runs', key=day.id) }}">{{ day.game_day }}</a> · {{ day.outcome|replace('_', ' ') }}{% if day.error_type %} · {{ day.error_type }}{% endif %}</li>
+                <li><a id="collection-day-{{ day.id }}" href="{{ url_for('raw_row', table='collection_runs', key=day.id) }}">{{ day.game_day }}</a> · {{ day.outcome|replace('_', ' ') }}{% if day.error_type %} · {{ day.error_type }}{% endif %}</li>
               {% endfor %}
             </ul>
           </details>
