@@ -78,14 +78,13 @@ def _write_caddyfile(caddy: str, url: str, sock: Path, directory: Path) -> Path:
         [caddy, "hash-password"], input=f"{PASSWORD}\n", text=True
     ).strip()
     version = subprocess.check_output([caddy, "version"], text=True)
-    snippet = re.search(
-        r"^    https://dashboard\.home\.arpa \{\n(?:[ \t]+[^\n]*\n)*?    \}\n",
-        DOCUMENTATION.read_text(),
-        re.MULTILINE,
+    _, opening, remainder = DOCUMENTATION.read_text().partition(
+        "\n    https://dashboard.home.arpa {\n"
     )
-    assert snippet is not None, "The README must provide the dashboard Caddy site block."
+    body, closing, _ = remainder.partition("\n    }\n")
+    assert opening and closing, "The README must provide the dashboard Caddy site block."
     site = (
-        dedent(snippet.group())
+        dedent(opening + body + closing)
         .replace("https://dashboard.home.arpa", url)
         .replace("<pi-lan-ip>", "127.0.0.1")
         .replace("<username>", "operator")
