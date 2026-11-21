@@ -132,7 +132,11 @@ def evaluate_games(
                 evaluation.observations.append(
                     GameObservation(game, "forecast_unavailable", detail)
                 )
-                logger.info("%s — skipped: forecast unavailable (%s)", matchup, exc)
+                logger.info(
+                    "%s — skipped: forecast unavailable (%s)",
+                    matchup,
+                    detail if collection_only else exc,
+                )
                 continue
 
             forecast_observed_at = dt.datetime.now(dt.UTC)
@@ -149,7 +153,11 @@ def evaluate_games(
                 # An alert lookup failing shouldn't drop the game - the line just shows
                 # no alert and scoring falls back to the forecast alone.
                 alerts_error_type = type(exc).__name__
-                logger.info("%s — no alert data (%s)", matchup, exc)
+                logger.info(
+                    "%s — no alert data (%s)",
+                    matchup,
+                    alerts_error_type if collection_only else exc,
+                )
 
             gw = evaluate_game(game, forecasts, alerts)
             evaluation.evaluated.append(gw)

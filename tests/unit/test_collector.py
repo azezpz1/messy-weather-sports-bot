@@ -1,4 +1,5 @@
 import datetime as dt
+import logging
 
 import httpx
 import respx
@@ -116,3 +117,61 @@ def test_ranked_college_game_keeps_partial_hourly_forecast():
     assert game.detail == "partial_forecast_coverage"
     assert len(game.forecasts) == 1
     assert game.result is not None and game.result.is_messy
+
+
+def test_bad_forecast_keeps_other_games_and_later_dates(monkeypatch, tmp_path):
+    now = dt.datetime(2026, 1, 18, 17, tzinfo=dt.UTC)
+    monkeypatch.setenv("MESSY_WEATHER_DB_PATH", str(tmp_path / "history.sqlite3"))
+    monkeypatch.setattr(
+        scheduler, "collect_window", lambda sport, _: collector.collect_window(sport, now)
+    )
+    with respx.mock:
+        respx.get(NFL.scoreboard_url).mock(
+            side_effect=lambda request: httpx.Response(
+                200,
+                json={
+                    "events": (
+                        [espn_event("GB", "CHI"), espn_event("BUF", "NE")]
+                        if request.url.params["dates"] == "20260118"
+                        else []
+                    )
+                },
+            )
+        )
+        good = stadium_for_team("GB")
+        mock_hourly_forecast(
+            good.latitude, good.longitude, response=forecast_response("Sunny", 45, "5 mph", 0)
+        )
+        bad = stadium_for_team("BUF")
+        payload = forecast_response("Rain", 45, "5 mph", 90).json()
+        payload["properties"]["periods"][0]["windSpeed"] = 20
+        mock_hourly_forecast(
+            bad.latitude, bad.longitude, response=httpx.Response(200, json=payload)
+        )
+
+        assert main(["collect", "--sport", "nfl"]) == 2
+
+    with forecast_db_transaction() as db:
+        observations = db.exec_driver_sql(
+            "SELECT outcome, detail FROM game_observations ORDER BY id"
+        ).all()
+        dates = db.exec_driver_sql(
+            "SELECT game_day, outcome FROM collection_runs ORDER BY game_day"
+        ).all()
+    assert observations == [("evaluated", None), ("forecast_unavailable", "ValueError")]
+    assert dates[0] == ("2026-01-18", "partial")
+    assert dates[-1] == ("2026-01-25", "complete")
+
+
+def test_collector_enables_application_info_without_enabling_httpx_info(monkeypatch, tmp_path):
+    root = logging.getLogger()
+    app = logging.getLogger("messy_weather_sports_bot")
+    monkeypatch.setattr(root, "level", logging.WARNING)
+    monkeypatch.setattr(root, "handlers", [])
+    monkeypatch.setattr(app, "level", logging.WARNING)
+    monkeypatch.setattr(app, "handlers", [])
+    monkeypatch.setenv("MESSY_WEATHER_DB_PATH", str(tmp_path / "history.sqlite3"))
+
+    assert main(["schedule", "status"]) == 0
+    assert app.isEnabledFor(logging.INFO)
+    assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)

@@ -12,6 +12,7 @@ from alembic.util.exc import CommandError
 from sqlalchemy.exc import SQLAlchemyError
 
 from messy_weather_sports_bot import scheduler, scheduler_store
+from messy_weather_sports_bot.cli import configure_logging
 from messy_weather_sports_bot.sports import SPORTS
 
 logger = logging.getLogger(__name__)
@@ -43,7 +44,7 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    configure_logging()
     now = dt.datetime.now(dt.UTC)
     try:
         scheduler_store.initialize(now)
