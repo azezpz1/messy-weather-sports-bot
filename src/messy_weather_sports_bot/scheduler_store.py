@@ -1,4 +1,4 @@
-"""Persistent collection schedules and execution history."""
+"""Persistent collection schedules, refresh requests, and execution history."""
 
 from __future__ import annotations
 
@@ -19,6 +19,10 @@ from messy_weather_sports_bot.sports import SPORTS
 DEFAULT_INTERVAL_SECONDS = 6 * 3600
 MAX_INTERVAL_SECONDS = 365 * 24 * 3600
 ExecutionOutcome = Literal["complete", "partial", "failed"]
+
+
+class ScheduleConflict(ValueError):
+    """The schedule changed since the caller last read it."""
 
 
 @dataclass(frozen=True)
@@ -57,14 +61,20 @@ def configure(
     *,
     interval_seconds: int | None = None,
     enabled: bool | None = None,
+    expected_revision: int | None = None,
 ) -> None:
     if interval_seconds is not None and not 0 < interval_seconds <= MAX_INTERVAL_SECONDS:
         raise ValueError("interval must be between one second and 365 days")
     with forecast_db_transaction() as db:
         current = db.exec_driver_sql(
-            "SELECT interval_seconds, enabled, next_due FROM collection_schedules WHERE sport = ?",
+            """
+            SELECT interval_seconds, enabled, next_due, revision
+            FROM collection_schedules WHERE sport = ?
+            """,
             (sport,),
         ).one()
+        if expected_revision is not None and expected_revision != current.revision:
+            raise ScheduleConflict("Schedule changed. Reload it before saving.")
         seconds = current.interval_seconds if interval_seconds is None else interval_seconds
         is_enabled = current.enabled if enabled is None else int(enabled)
         if (seconds, is_enabled) == (current.interval_seconds, current.enabled):
@@ -72,7 +82,7 @@ def configure(
         next_due = current.next_due
         if enabled and not current.enabled:
             next_due = _stamp(now)
-        elif interval_seconds is not None:
+        elif seconds != current.interval_seconds:
             next_due = _stamp(now + dt.timedelta(seconds=seconds))
         db.exec_driver_sql(
             """
@@ -82,6 +92,31 @@ def configure(
             """,
             (seconds, is_enabled, next_due, sport),
         )
+
+
+def request_refresh(sport: str, now: dt.datetime) -> int:
+    """Queue a refresh or return the existing pending or running request ID."""
+    if sport not in SPORTS:
+        raise ValueError("unsupported sport")
+    with forecast_db_transaction() as db:
+        latest = db.exec_driver_sql(
+            """
+            SELECT q.id, q.execution_id, e.outcome
+            FROM collection_refresh_requests AS q
+            LEFT JOIN collection_executions AS e ON e.id = q.execution_id
+            WHERE q.sport = ? ORDER BY q.id DESC LIMIT 1
+            """,
+            (sport,),
+        ).one_or_none()
+        if latest is not None and (latest.execution_id is None or latest.outcome == "running"):
+            return latest.id
+        return db.exec_driver_sql(
+            """
+            INSERT INTO collection_refresh_requests (sport, requested_at)
+            VALUES (?, ?) RETURNING id
+            """,
+            (sport, _stamp(now)),
+        ).scalar_one()
 
 
 def recover(now: dt.datetime) -> None:
@@ -119,16 +154,40 @@ def claim_manual(sport: str, now: dt.datetime) -> Execution:
         return Execution(_insert_execution(db, sport, now, None), sport, None)
 
 
-def claim_due(now: dt.datetime) -> Execution | None:
+def claim_requested(now: dt.datetime) -> Execution | None:
+    """Start the oldest pending request while the caller holds the collector lock."""
+    with forecast_db_transaction() as db:
+        request = db.exec_driver_sql(
+            """
+            SELECT id, sport FROM collection_refresh_requests WHERE execution_id IS NULL
+            ORDER BY requested_at, id LIMIT 1
+            """
+        ).one_or_none()
+        if request is None:
+            return None
+        execution_id = _insert_execution(db, request.sport, now, None)
+        db.exec_driver_sql(
+            "UPDATE collection_refresh_requests SET execution_id = ? WHERE id = ?",
+            (execution_id, request.id),
+        )
+        return Execution(execution_id, request.sport, None)
+
+
+def claim_due(now: dt.datetime, *, defer_to_requests: bool = False) -> Execution | None:
+    """Start the next due schedule, optionally yielding to older queued refreshes."""
     with forecast_db_transaction() as db:
         row = db.exec_driver_sql(
             """
-            SELECT sport, next_due, interval_seconds, revision
-            FROM collection_schedules
-            WHERE enabled = 1 AND next_due <= ?
-            ORDER BY next_due, sport LIMIT 1
+            SELECT s.sport, s.next_due, s.interval_seconds, s.revision
+            FROM collection_schedules AS s
+            WHERE s.enabled = 1 AND s.next_due <= ?
+              AND NOT EXISTS (
+                  SELECT 1 FROM collection_refresh_requests
+                  WHERE ? AND execution_id IS NULL AND requested_at <= s.next_due
+              )
+            ORDER BY s.next_due, s.sport LIMIT 1
             """,
-            (_stamp(now),),
+            (_stamp(now), defer_to_requests),
         ).one_or_none()
         if row is None:
             return None

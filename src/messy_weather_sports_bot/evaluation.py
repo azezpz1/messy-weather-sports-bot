@@ -64,8 +64,8 @@ def rankings_missing(sport: Sport, games: list[Game]) -> bool:
     unreadable = sum(game.rankings_unreadable for game in games)
     if unreadable:
         logger.warning(
-            "ESPN sent a ranking this bot can't read for %d of the %d games on this slate; "
-            "its response may have changed.",
+            "There is a ranking this bot can't read for %d of the %d games on the ESPN slate; "
+            "a ranking field may be missing or malformed.",
             unreadable,
             len(games),
         )

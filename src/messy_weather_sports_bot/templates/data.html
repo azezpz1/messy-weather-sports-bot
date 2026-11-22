@@ -1,0 +1,10 @@
+{% extends 'base.html' %}
+{% block title %}Stored data · Messy Weather{% endblock %}
+{% block content %}
+  <h1>Stored data</h1>
+  <ul class="record-list">
+    {% for table, label in table_labels.items() %}
+      <li><a href="{{ url_for('raw_table', table=table) }}">{{ label }}</a> <code>{{ table }}</code></li>
+    {% endfor %}
+  </ul>
+{% endblock %}

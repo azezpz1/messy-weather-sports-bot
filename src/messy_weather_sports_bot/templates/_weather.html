@@ -1,0 +1,19 @@
+{% macro evaluation(observation) %}
+  <span class="badge badge-{{ observation.weather_status }}">
+    {{ weather_labels.get(observation.weather_status, 'Awaiting collection') }}
+  </span>
+  {% if observation.stale %}<span class="badge">Stale</span>{% endif %}
+  {% if observation.partial_coverage %}<span class="badge">Partial coverage</span>{% endif %}
+  {% if observation.alerts_error_type %}<span class="badge">Alert lookup unavailable</span>{% endif %}
+  {% if observation.selected_forecast %}
+    <p>{{ observation.selected_forecast.short_forecast }}{% if observation.selected_forecast.temperature_f is not none %} · {{ observation.selected_forecast.temperature_f }} °F{% endif %} · {{ observation.selected_forecast.wind_speed_mph }} mph wind</p>
+  {% endif %}
+  {% if observation.condition and observation.is_messy %}
+    <p class="detail-label">Qualifies for {{ observation.condition|replace('_', ' ') }}</p>
+  {% endif %}
+  {% if observation.alert_event %}<p class="detail-label">{{ observation.alert_event }}</p>{% endif %}
+{% endmacro %}
+
+{% macro score(value) -%}
+  {% if value is none %}—{% else %}{{ '%.1f'|format(value) }}{% endif %}
+{%- endmacro %}

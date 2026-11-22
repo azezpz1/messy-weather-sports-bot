@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% from '_raw.html' import value %}
+{% block title %}{{ table_labels[table] }} record · Messy Weather{% endblock %}
+{% block content %}
+  <a class="back" href="{{ url_for('raw_table', table=table) }}">← {{ table_labels[table] }}</a>
+  <h1>{{ table_labels[table] }} record</h1>
+  <div class="table-scroll">
+    <table class="raw-table row-detail">
+      <thead><tr><th scope="col">Column</th><th scope="col">Stored value</th></tr></thead>
+      <tbody>
+        {% for column, stored in row.items() %}<tr><th scope="row">{{ column }}</th><td>{{ value(column, stored) }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

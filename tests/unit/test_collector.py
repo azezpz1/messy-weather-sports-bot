@@ -2,15 +2,16 @@ import datetime as dt
 import logging
 
 import httpx
+import pytest
 import respx
 
-from messy_weather_sports_bot import collector, scheduler, scheduler_store
+from messy_weather_sports_bot import collector, dashboard_read, scheduler, scheduler_store
 from messy_weather_sports_bot.cfb import CFB, cfb_catalog
 from messy_weather_sports_bot.collection import forecast_db_transaction
 from messy_weather_sports_bot.collector_cli import main
 from messy_weather_sports_bot.nfl import NFL
 from messy_weather_sports_bot.stadiums import stadium_for_team
-from tests.support.espn import cfb_event, espn_event
+from tests.support.espn import MISSING, cfb_event, espn_event
 from tests.support.nws import forecast_response, mock_hourly_forecast
 
 
@@ -175,3 +176,98 @@ def test_collector_enables_application_info_without_enabling_httpx_info(monkeypa
     assert main(["schedule", "status"]) == 0
     assert app.isEnabledFor(logging.INFO)
     assert not logging.getLogger("httpx").isEnabledFor(logging.INFO)
+
+
+def test_a_scoreboard_without_events_does_not_replace_the_slate_with_an_empty_day():
+    now = dt.datetime(2026, 11, 21, 18, tzinfo=dt.UTC)
+    with respx.mock:
+        respx.get(NFL.scoreboard_url).mock(
+            side_effect=[httpx.Response(200, json={}), httpx.Response(200, json={"events": []})]
+        )
+        failed, empty = (next(collector.collect_window(NFL, now)) for _ in range(2))
+
+    assert failed.outcome == "schedule_unavailable"
+    assert failed.games_found is None
+    assert empty.outcome == "complete"
+    assert empty.games_found == 0
+
+
+@pytest.mark.parametrize(
+    ("replacement", "notice"),
+    [
+        pytest.param({}, "schedule_unavailable", id="missing-competition"),
+        pytest.param(
+            cfb_event("Ohio State", "Michigan", kickoff="2026-01-18T18:00"),
+            "schedule_unavailable",
+            id="timezone-naive-kickoff",
+        ),
+        pytest.param(
+            {"competitions": [{"date": "2026-01-18T18:00Z", "competitors": []}]},
+            "schedule_unavailable",
+            id="missing-competitors",
+        ),
+        pytest.param(
+            {
+                "competitions": [
+                    {
+                        "date": "2026-01-18T18:00Z",
+                        "competitors": [{"homeAway": "home"}, {"homeAway": "away"}],
+                    }
+                ]
+            },
+            "schedule_unavailable",
+            id="missing-team-labels",
+        ),
+        pytest.param(
+            cfb_event("Ohio State", "Michigan", home_curated=MISSING, away_curated=MISSING),
+            "rankings_unavailable",
+            id="both-rankings-missing",
+        ),
+        pytest.param(
+            cfb_event("Ohio State", "Michigan", home_curated=MISSING),
+            "rankings_unavailable",
+            id="one-ranking-missing",
+        ),
+    ],
+)
+def test_incomplete_scoreboard_retains_previously_verified_slate(
+    monkeypatch, tmp_path, replacement, notice
+):
+    now = dt.datetime(2026, 1, 18, 17, tzinfo=dt.UTC)
+    path = tmp_path / "history.sqlite3"
+    monkeypatch.setenv("MESSY_WEATHER_DB_PATH", str(path))
+    scheduler_store.initialize(now)
+    stadium = cfb_catalog().for_venue("3861", "")
+    assert stadium is not None
+
+    events = [
+        cfb_event("Ohio State", "Michigan", home_rank=3),
+        replacement,
+        cfb_event("Ohio State", "Michigan"),
+    ]
+    with respx.mock:
+        respx.get(CFB.scoreboard_url).mock(
+            side_effect=[httpx.Response(200, json={"events": [event]}) for event in events]
+        )
+        mock_hourly_forecast(
+            stadium.latitude,
+            stadium.longitude,
+            response=forecast_response("Rain", 45, "5 mph", 90),
+        )
+
+        def refresh():
+            execution = scheduler_store.claim_manual("cfb", now)
+            scheduler_store.save_day(execution, next(collector.collect_window(CFB, now)))
+            with dashboard_read.read_database(path) as db:
+                return dashboard_read.browse_games(db, "cfb", now)
+
+        (verified,) = refresh()["games"]
+        unverified = refresh()
+        unranked = refresh()
+
+    assert [game["id"] for game in unverified["games"]] == [verified["id"]]
+    assert unverified["notices"] == [
+        {"game_day": "2026-01-18", "outcome": notice, "retained": True}
+    ]
+    assert unranked["games"] == []
+    assert unranked["notices"] == []

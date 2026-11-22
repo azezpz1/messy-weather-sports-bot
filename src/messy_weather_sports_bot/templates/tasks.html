@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+{% block title %}Collection tasks · Messy Weather{% endblock %}
+{% block scripts %}
+  <script defer src="{{ url_for('static', filename='vendor/htmx-2.0.11.min.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='task-history.js') }}"></script>
+{% endblock %}
+{% block content %}
+  <h1>Collection tasks</h1>
+  {% if not schedules %}<p class="notice">Start the collector to initialize the schedules.</p>{% endif %}
+  <div class="task-grid">
+    {% for schedule in schedules %}
+      <section class="panel" id="{{ schedule.sport }}-schedule">
+        <h2>{{ sport_names[schedule.sport] }}</h2>
+        <dl class="metadata">
+          <dt>Next run</dt><dd>{{ schedule.next_due|timestamp(schedule.sport) if schedule.enabled else 'Paused' }}</dd>
+        </dl>
+        {% if editing == schedule.sport %}<p class="notice" role="alert">{{ message }}</p>{% endif %}
+        <form class="schedule-form" method="post" action="{{ url_for('edit_schedule', sport=schedule.sport) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="revision" value="{{ schedule.revision }}">
+          <label>Interval in hours <input type="number" name="hours" min="1" max="{{ max_hours }}" value="{{ schedule.interval_seconds|interval_hours }}" required></label>
+          <label>Recurring schedule
+            <select name="enabled">
+              <option value="1"{% if schedule.enabled %} selected{% endif %}>Enabled</option>
+              <option value="0"{% if not schedule.enabled %} selected{% endif %}>Paused</option>
+            </select>
+          </label>
+          <button class="secondary" type="submit">Save schedule</button>
+        </form>
+        <form method="post" action="{{ url_for('refresh', sport=schedule.sport) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button type="submit">Refresh now</button>
+        </form>
+      </section>
+    {% endfor %}
+  </div>
+  {% include 'task_status.html' %}
+{% endblock %}

@@ -239,6 +239,125 @@ outcome. After resolving the problem, use `collect --sport nfl` or
 and their existing Healthchecks in place. Store the service configuration and
 runtime database outside the repository.
 
+### Private forecast dashboard
+
+The dashboard shows the collector's next seven days on separate NFL and Top 25
+CFB tabs. Sort games by messiness or kickoff, filter by date or precipitation
+type, and open a matchup for its hourly forecast and saved observations. It uses
+the same scoring rules as the publishing bots. **Tasks** manages the two
+collection schedules and manual refreshes. **Data** browses the stored forecast
+and scheduler tables in read-only mode.
+
+Run the [independent collector](#independent-forecast-collection) first to apply
+the database migrations and populate schedules. The dashboard, collector, and
+publishing jobs use the same release and local database directory. Their users
+need the appropriate permissions on that directory and its database and lock
+files. Give the dashboard and collector their own service configuration.
+
+#### Run the dashboard as a systemd service
+
+Install Caddy with your OS package manager before creating the dashboard
+service. Create a dashboard environment file outside the checkout. Adapt it to
+your installation.
+
+    MESSY_WEATHER_DB_PATH=/path/to/forecast-history.sqlite3
+    MESSY_WEATHER_DASHBOARD_HOST=dashboard.home.arpa
+    MESSY_WEATHER_DASHBOARD_SECRET=<random secret>
+
+Generate the session secret with `openssl rand -hex 32` and save it in the
+environment file. Restrict access to the file. Set the host to the exact
+hostname or LAN IP used in the browser, without an HTTPS scheme or port.
+
+Create a local `messy-weather-dashboard.service` using your service account,
+paths, and environment file.
+
+    [Unit]
+    Description=Messy weather forecast dashboard
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=<service-user>
+    Group=caddy
+    RuntimeDirectory=messy-weather-dashboard
+    RuntimeDirectoryMode=0750
+    WorkingDirectory=/path/to/messy-weather-sports-bot
+    EnvironmentFile=/path/to/dashboard.env
+    ExecStart=/path/to/uv run --locked messy-weather-dashboard
+    Restart=on-failure
+    RestartSec=5
+
+    [Install]
+    WantedBy=multi-user.target
+
+The proxy account needs the socket group only. If a separate group controls
+the shared database, add that group to the dashboard unit's
+`SupplementaryGroups=`.
+
+Enable the service after reloading systemd.
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable --now messy-weather-dashboard
+
+Waitress serves through `/run/messy-weather-dashboard/dashboard.sock`. The
+dashboard and Caddy service accounts can open the socket. Publishing and
+collection continue while the dashboard service is stopped.
+
+#### Serve the dashboard on your home network
+
+Choose a LAN hostname that resolves on both devices or use a reserved LAN IP.
+Run `caddy hash-password` and enter your dashboard password when prompted. Keep
+the password hash and the actual Caddyfile on the server. Adapt this example
+site block to your host, interface, and credentials.
+
+    https://dashboard.home.arpa {
+        bind <pi-lan-ip>
+        tls internal
+        basic_auth {
+            <username> <password-hash>
+        }
+        reverse_proxy unix//run/messy-weather-dashboard/dashboard.sock {
+            header_up Host {hostport}
+            header_up -Authorization
+        }
+    }
+
+Caddy 2.6 and 2.7 use `basicauth` for the same directive. Caddy 2.8 and newer
+use `basic_auth`. Restrict the HTTPS port to the trusted home network in your
+host firewall.
+Validate the Caddyfile and reload the Caddy service.
+
+    sudo caddy validate --config /etc/caddy/Caddyfile
+    sudo systemctl reload caddy
+
+Caddy authenticates every browser request. Its local CA signs the dashboard
+certificate.
+
+- Transfer the CA's public root certificate from Caddy's
+  [data directory](https://caddyserver.com/docs/automatic-https#local-https)
+  to your devices. Keep the private key on the server.
+- On iPhone, install the certificate, then enable TLS trust under **Settings
+  → General → About → Certificate Trust Settings**.
+  [Apple certificate trust instructions](https://support.apple.com/en-ie/102390)
+- On desktop, add the certificate to your OS or browser trust store.
+- Open the HTTPS URL on both devices and sign in. Verify the NFL and CFB tabs
+  load, queue a refresh from **Tasks**, and open a row in **Data**.
+
+The existing release updater installs the dashboard's Python dependencies
+through uv. Use the [coordinated update procedure](#updating-to-the-latest-release)
+when the dashboard and collector share the checkout. Caddy updates through the
+OS package manager. The bundled htmx asset ships with a normal app release.
+
+The browser tests run in CI with Chromium and an iPhone-sized WebKit viewport.
+CI also verifies the documented Caddy configuration against Waitress over HTTPS.
+To reproduce these checks, install Caddy on your development machine, install
+the browser engines, and run the optional test group.
+
+    uv run --locked --group e2e playwright install chromium webkit
+    uv run --locked --group e2e pytest --no-cov tests/e2e
+
+Playwright's `install --with-deps` flag also installs system libraries on Linux.
+
 ### Failure alerting with Healthchecks.io
 
 The bot's own logs only help if something reads them. Since it normally runs
@@ -378,14 +497,19 @@ This asks GitHub for the latest *published* release rather than just the
 newest tag, since a repo could in principle have tags that were never turned
 into a release, then checks out that tag and runs `uv sync`.
 
-Run it before your scheduled job (e.g. as the first line of the wrapper
-script your crontab invokes) to stay on the latest release without ever
-checking out unreleased commits from `main`. If you're hitting GitHub's
+If the checkout is also used by a running collector or dashboard, coordinate
+updates outside the publishing window. Remove the updater from any publishing
+wrapper and remove any standalone updater cron entry. Keep the publishing
+cron commands. Stop the collector and dashboard, run the updater, then start
+the collector first so it can migrate the database. Start the dashboard
+after the collector is ready.
+
+For a publishing-only checkout, you can run the updater before your scheduled
+job, such as from the wrapper your crontab invokes. If you hit GitHub's
 unauthenticated API rate limit, set a `GITHUB_TOKEN` env var (no special
 permissions needed) and the script will use it.
 
-Rather than running it inline before every scheduled post, you can instead
-give it its own crontab entry so the checkout is refreshed ahead of time —
+For a publishing-only checkout, you can also schedule the updater separately —
 for example, Saturday at midnight so it's ready before the Sunday morning
 run:
 
