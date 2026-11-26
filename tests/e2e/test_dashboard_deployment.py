@@ -126,16 +126,20 @@ def _wait_for_login(
 
 def _check_login_and_refresh(url: str, tls: ssl.SSLContext) -> None:
     with httpx.Client(base_url=url, verify=tls, trust_env=False) as client:
-        assert client.get("/admin/tasks").status_code == 401
-        assert client.get("/admin/data/games").status_code == 401
+        for path in ("/games/nfl", "/admin/tasks", "/admin/tasks/status", "/admin/data/games"):
+            response = client.get(path)
+            assert response.status_code == 401
+            assert response.headers["WWW-Authenticate"].startswith("Basic ")
         auth = ("operator", PASSWORD)
         tasks = client.get("/admin/tasks", auth=auth)
         assert tasks.status_code == 200
+        _check_browser_resources(client, tasks.text)
         assert "Secure" in tasks.headers["Set-Cookie"]
         token = re.search(r'name="csrf_token" value="([^"]+)"', tasks.text)
         assert token is not None
         form = {"csrf_token": token.group(1)}
         refresh = "/admin/tasks/nfl/refresh"
+        assert client.post(refresh, data=form).status_code == 401
         assert client.post(refresh, auth=auth, data=form).status_code == 400
         assert (
             client.post(
@@ -148,3 +152,21 @@ def _check_login_and_refresh(url: str, tls: ssl.SSLContext) -> None:
         oversized = client.post(refresh, auth=auth, content=b"x" * (8 * 1024 + 1))
         assert oversized.status_code == 413
         assert "X-Content-Type-Options" not in oversized.headers
+
+
+def _check_browser_resources(client: httpx.Client, tasks_html: str) -> None:
+    assets = re.findall(r'(?:href|src)="(/static/[^"]+)"', tasks_html)
+    assert assets, "The dashboard must link to its CSS and JavaScript."
+    # Browsers can request assets and discover icons without sending page credentials.
+    icons = (
+        "/favicon.ico",
+        "/apple-touch-icon.png",
+        "/apple-touch-icon-precomposed.png",
+        "/apple-touch-icon-180x180.png",
+    )
+    expected = dict.fromkeys(assets, (200, False)) | dict.fromkeys(icons, (404, False))
+    actual = {}
+    for path in expected:
+        response = client.get(path)
+        actual[path] = (response.status_code, "WWW-Authenticate" in response.headers)
+    assert actual == expected
