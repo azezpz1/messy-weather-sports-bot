@@ -158,7 +158,7 @@ def test_a_failed_alert_lookup_does_not_skip_the_game(capsys: pytest.CaptureFixt
     exit_code = run(platform_names=[], dry_run=True)
 
     out = capsys.readouterr().out
-    assert exit_code == EXIT_OK
+    assert exit_code == EXIT_PARTIAL
     assert "CHI @ GB" in out
 
 
@@ -432,7 +432,7 @@ def test_an_unhandled_exception_still_sends_a_failure_ping(
     )
     monkeypatch.setattr(
         "messy_weather_sports_bot.pipeline.GameDayPipeline.run",
-        lambda self, platform_names, dry_run, force, date: (_ for _ in ()).throw(
+        lambda self, platform_names, dry_run, force, date, *, live: (_ for _ in ()).throw(
             RuntimeError("boom")
         ),
     )
@@ -486,7 +486,7 @@ def test_the_failure_ping_after_a_crash_includes_the_running_version(
     )
     monkeypatch.setattr(
         "messy_weather_sports_bot.pipeline.GameDayPipeline.run",
-        lambda self, platform_names, dry_run, force, date: (_ for _ in ()).throw(
+        lambda self, platform_names, dry_run, force, date, *, live: (_ for _ in ()).throw(
             RuntimeError("boom")
         ),
     )
@@ -715,7 +715,7 @@ def test_a_state_write_failure_does_not_change_the_posting_outcome(
         lambda platform_names, dry_run, env_prefix: [RecordingPoster()],
     )
 
-    def _broken_record(self, name, posts, *, completed):
+    def _broken_record(self, name, posts, *, completed, posted_texts):
         raise OSError("disk full")
 
     monkeypatch.setattr("messy_weather_sports_bot.state.DayState.record", _broken_record)
@@ -755,7 +755,7 @@ def test_a_state_write_failure_after_a_partial_thread_does_not_escape_run(
         lambda ranked, date, sport: ["root post", "reply post"],
     )
 
-    def _broken_record(self, name, posts, *, completed):
+    def _broken_record(self, name, posts, *, completed, posted_texts):
         raise OSError("disk full")
 
     monkeypatch.setattr("messy_weather_sports_bot.state.DayState.record", _broken_record)

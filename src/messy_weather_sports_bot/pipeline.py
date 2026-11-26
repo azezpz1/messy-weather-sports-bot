@@ -21,6 +21,7 @@ from messy_weather_sports_bot.poster.base import PartialThreadError, SocialMedia
 from messy_weather_sports_bot.poster.console import ConsolePoster
 from messy_weather_sports_bot.schedule import todays_game_day
 from messy_weather_sports_bot.sport import Sport
+from messy_weather_sports_bot.stored_publication import load_stored_evaluation
 from messy_weather_sports_bot.weather import get_forecast
 
 logger = logging.getLogger(__name__)
@@ -80,7 +81,12 @@ def _log_run_summary(
 
 
 def _record_state(
-    day_state: state.DayState | None, platform: str, refs: list[state.PostRef], *, completed: bool
+    day_state: state.DayState | None,
+    platform: str,
+    refs: list[state.PostRef],
+    *,
+    completed: bool,
+    posted_texts: list[str] | None = None,
 ) -> None:
     """Persist `refs` for `platform`, without letting a state-write failure (a full
     disk, a read-only directory) change the posting outcome or escape `run()` -
@@ -88,7 +94,7 @@ def _record_state(
     if day_state is None:
         return
     try:
-        day_state.record(platform, refs, completed=completed)
+        day_state.record(platform, refs, completed=completed, posted_texts=posted_texts)
     except OSError as exc:
         logger.warning("Could not save post state for %s: %s", platform, exc)
 
@@ -103,6 +109,8 @@ class GameDayPipeline:
         dry_run: bool,
         force: bool = False,
         date: dt.date | None = None,
+        *,
+        live: bool = False,
     ) -> int:
         sport = self.sport
         today = todays_game_day(sport)
@@ -111,8 +119,78 @@ class GameDayPipeline:
             logger.warning("Previewing %s, not today; forcing --dry-run.", date.isoformat())
             dry_run = True
         started_at = dt.datetime.now(dt.UTC)
+        stored = None if live else load_stored_evaluation(sport, date, started_at)
+        if stored is not None:
+            games_found, evaluation = stored
+            incomplete = False
+        else:
+            fetched = self._evaluate_live(date, started_at, dry_run)
+            if fetched is None:
+                _log_run_summary(None, Evaluation(), [], None)
+                return EXIT_NOTHING_POSTED
+            games_found, evaluation, incomplete = fetched
+
+        messy = evaluation.messy
+        # A dry run must never touch the state file - only construct a DayState (which
+        # reads it) when actually posting for real.
+        day_state = (
+            None
+            if dry_run
+            else state.DayState.load(state.state_file_path(date, sport_key=sport.state_key))
+        )
+
+        unfinished = (
+            not messy and not force and day_state is not None and day_state.has_partial_thread
+        )
+        if unfinished:
+            logger.warning("A partial thread still needs attention for %s.", date)
+
+        if evaluation.outdoor_count == 0:
+            if incomplete:
+                logger.warning("Schedule or venue data incomplete for %s; nothing to post.", date)
+            else:
+                logger.info("No outdoor %s games on %s; nothing to post.", sport.name, date)
+            _log_run_summary(games_found, evaluation, [], None)
+            return EXIT_PARTIAL if incomplete or unfinished else EXIT_OK
+
+        if not evaluation.evaluated:
+            logger.error(
+                "Forecast unavailable for every outdoor game on %s; nothing to post.",
+                date.isoformat(),
+            )
+            _log_run_summary(games_found, evaluation, [], None)
+            return EXIT_NOTHING_POSTED
+
+        if not messy:
+            logger.info("No messy-weather games on %s; nothing to post.", date.isoformat())
+            _log_run_summary(games_found, evaluation, [], None)
+            # A game whose forecast couldn't be fetched might have been the messy one.
+            return EXIT_PARTIAL if incomplete or unfinished else EXIT_OK
+
+        ranked = sort_by_messiness(messy)
+        post_texts = build_post_texts(ranked, date, sport)
+        posters = build_posters(platform_names, dry_run, sport.env_prefix)
+
+        publication = self._publish(posters, post_texts, day_state, force)
+
+        if publication.platforms_failed == len(posters):
+            exit_code = EXIT_NOTHING_POSTED
+        elif incomplete or publication.platforms_failed or publication.platforms_degraded:
+            exit_code = EXIT_PARTIAL
+        else:
+            exit_code = EXIT_OK
+
+        _log_run_summary(
+            games_found, evaluation, publication.platforms_posted, publication.thread_root
+        )
+        return exit_code
+
+    def _evaluate_live(
+        self, date: dt.date, started_at: dt.datetime, dry_run: bool
+    ) -> tuple[int, Evaluation, bool] | None:
+        sport = self.sport
         try:
-            games = EspnScoreboard(sport).fetch(date)
+            games = EspnScoreboard(sport, verify_slate=True).fetch(date)
         except VenueTableError as exc:
             if not dry_run:
                 record_collection(
@@ -124,9 +202,8 @@ class GameDayPipeline:
                     error_type=type(exc).__name__,
                 )
             logger.error("Cannot run: %s", exc)
-            _log_run_summary(None, Evaluation(), [], None)
-            return EXIT_NOTHING_POSTED
-        except (httpx.HTTPError, ValueError) as exc:
+            return None
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError) as exc:
             if not dry_run:
                 record_collection(
                     sport.slug,
@@ -137,83 +214,27 @@ class GameDayPipeline:
                     error_type=type(exc).__name__,
                 )
             logger.error(
-                "Could not fetch the %s schedule for %s: %s", sport.name, date.isoformat(), exc
+                "Could not fetch the %s schedule for %s (%s).",
+                sport.name,
+                date.isoformat(),
+                type(exc).__name__,
             )
-            _log_run_summary(None, Evaluation(), [], None)
-            return EXIT_NOTHING_POSTED
+            return None
 
         missing_rankings = rankings_missing(sport, games)
         evaluation = evaluate_games(sport, games, get_forecast, get_active_alerts)
+        incomplete = missing_rankings or evaluation.incomplete
         if not dry_run:
-            partial = (
-                missing_rankings
-                or evaluation.games_missing > 0
-                or any(
-                    observation.alerts_error_type is not None
-                    or observation.outcome == "venue_unavailable"
-                    for observation in evaluation.observations
-                )
-            )
             record_collection(
                 sport.slug,
                 date,
                 started_at,
-                "partial" if partial else "complete",
+                "partial" if incomplete else "complete",
                 len(games),
                 evaluation.observations,
                 rankings_unavailable=missing_rankings,
             )
-        messy = evaluation.messy
-
-        if evaluation.outdoor_count == 0:
-            logger.info("No outdoor %s games on %s; nothing to post.", sport.name, date.isoformat())
-            _log_run_summary(len(games), evaluation, [], None)
-            # With no rankings every game is filtered out, which is how a response change
-            # would otherwise pass for a quiet day.
-            return EXIT_PARTIAL if missing_rankings else EXIT_OK
-
-        if not evaluation.evaluated:
-            logger.error(
-                "Forecast unavailable for every outdoor game on %s; nothing to post.",
-                date.isoformat(),
-            )
-            _log_run_summary(len(games), evaluation, [], None)
-            return EXIT_NOTHING_POSTED
-
-        if not messy:
-            logger.info("No messy-weather games on %s; nothing to post.", date.isoformat())
-            _log_run_summary(len(games), evaluation, [], None)
-            # A game whose forecast couldn't be fetched might have been the messy one.
-            return EXIT_PARTIAL if evaluation.games_missing else EXIT_OK
-
-        ranked = sort_by_messiness(messy)
-        post_texts = build_post_texts(ranked, date, sport)
-        posters = build_posters(platform_names, dry_run, sport.env_prefix)
-
-        # A dry run must never touch the state file - only construct a DayState (which
-        # reads it) when actually posting for real.
-        day_state = (
-            None
-            if dry_run
-            else state.DayState.load(state.state_file_path(date, sport_key=sport.state_key))
-        )
-        publication = self._publish(posters, post_texts, day_state, force)
-
-        if publication.platforms_failed == len(posters):
-            exit_code = EXIT_NOTHING_POSTED
-        elif (
-            evaluation.games_missing
-            or publication.platforms_failed
-            or publication.platforms_degraded
-        ):
-            exit_code = EXIT_PARTIAL
-        else:
-            exit_code = EXIT_OK
-
-        _log_run_summary(
-            len(games), evaluation, publication.platforms_posted, publication.thread_root
-        )
-        return exit_code
+        return len(games), evaluation, incomplete
 
     def _publish(
         self,
@@ -240,6 +261,19 @@ class GameDayPipeline:
                         publication.thread_root = platform_state.posts[0].id
                     continue
                 resume = platform_state.posts or None
+                posted_texts = platform_state.posted_texts
+                if (
+                    resume
+                    and posted_texts is not None
+                    and post_texts[: len(resume)] != posted_texts
+                ):
+                    logger.warning(
+                        "%s has a partial thread whose posted text differs from the current "
+                        "recommendations. Skipping replies to that thread.",
+                        platform,
+                    )
+                    publication.platforms_degraded += 1
+                    continue
 
             try:
                 refs = poster.post_thread(post_texts, resume=resume)
@@ -251,7 +285,13 @@ class GameDayPipeline:
                 # Some posts in the thread went out before it failed - not "nothing
                 # posted", but still worth flagging as degraded.
                 publication.platforms_degraded += 1
-                _record_state(day_state, platform, exc.posted, completed=False)
+                _record_state(
+                    day_state,
+                    platform,
+                    exc.posted,
+                    completed=False,
+                    posted_texts=post_texts[: len(exc.posted)],
+                )
                 logger.warning(
                     "Partially posted to %s (%d/%d posts before failing): %s",
                     platform,

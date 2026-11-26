@@ -6,11 +6,9 @@ import datetime as dt
 import re
 import sqlite3
 from collections import defaultdict
-from collections.abc import Generator
-from contextlib import closing, contextmanager
-from pathlib import Path
 from typing import Any
 
+from messy_weather_sports_bot.collection import read_database as read_database
 from messy_weather_sports_bot.collector import FORECAST_WINDOW
 from messy_weather_sports_bot.scheduler_store import DEFAULT_INTERVAL_SECONDS
 from messy_weather_sports_bot.sports import SPORTS
@@ -72,6 +70,7 @@ RAW_TABLES = {
         "rankings_unavailable",
         "error_type",
         "execution_id",
+        "publication_game_count",
     ),
     "collection_schedules": ("sport", "interval_seconds", "enabled", "next_due", "revision"),
     "collection_executions": (
@@ -99,16 +98,6 @@ _THUNDERSTORMS = re.compile(r"\b(?:thunderstorms?|t-storms?)\b")
 
 # Views combine stored SQLite values with derived display values and child rows.
 Row = dict[str, Any]
-
-
-@contextmanager
-def read_database(path: Path | str) -> Generator[sqlite3.Connection]:
-    """Open an existing database and read a consistent snapshot without a write lock."""
-    uri = Path(path).absolute().as_uri() + "?mode=ro"
-    with closing(sqlite3.connect(uri, uri=True, timeout=0.5)) as db:
-        db.row_factory = sqlite3.Row
-        db.execute("BEGIN")
-        yield db
 
 
 def _rows(db: sqlite3.Connection, sql: str, parameters: tuple = ()) -> list[Row]:

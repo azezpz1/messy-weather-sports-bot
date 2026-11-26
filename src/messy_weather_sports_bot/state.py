@@ -52,15 +52,24 @@ class PlatformState:
     """One platform's progress on today's thread: the refs published so far, and
     whether the thread finished completely."""
 
-    def __init__(self, posts: list[PostRef] | None = None, completed: bool = False) -> None:
+    def __init__(
+        self,
+        posts: list[PostRef] | None = None,
+        completed: bool = False,
+        posted_texts: list[str] | None = None,
+    ) -> None:
         self.posts = posts or []
         self.completed = completed
+        self.posted_texts = posted_texts
 
     def to_json(self) -> dict:
-        return {
+        data = {
             "completed": self.completed,
             "posts": [{"id": r.id, "root_id": r.root_id, "cid": r.cid} for r in self.posts],
         }
+        if self.posted_texts is not None:
+            data["posted_texts"] = self.posted_texts
+        return data
 
     @staticmethod
     def _post_ref_from_json(p: dict) -> PostRef:
@@ -79,7 +88,17 @@ class PlatformState:
         something `to_json()` would have produced - callers (`DayState.load`) treat
         that the same as corrupt JSON: log a warning and fall back to empty state."""
         posts = [cls._post_ref_from_json(p) for p in data.get("posts", [])]
-        return cls(posts=posts, completed=bool(data.get("completed", False)))
+        posted_texts = data.get("posted_texts")
+        if posted_texts is not None and (
+            not isinstance(posted_texts, list)
+            or not all(isinstance(text, str) for text in posted_texts)
+        ):
+            # Retain post references even if the new metadata is unreadable. An empty
+            # prefix blocks unsafe retries of a partial thread that already has posts.
+            posted_texts = []
+        return cls(
+            posts=posts, completed=bool(data.get("completed", False)), posted_texts=posted_texts
+        )
 
 
 class DayState:
@@ -110,10 +129,24 @@ class DayState:
     def for_platform(self, name: str) -> PlatformState:
         return self.platforms.get(name, PlatformState())
 
-    def record(self, name: str, posts: list[PostRef], *, completed: bool) -> None:
-        """Persist `posts` (everything published so far) for `name` immediately - a
-        crash right after a post must not lose track of what already went out."""
-        self.platforms[name] = PlatformState(posts=posts, completed=completed)
+    @property
+    def has_partial_thread(self) -> bool:
+        return any(
+            platform.posts and not platform.completed for platform in self.platforms.values()
+        )
+
+    def record(
+        self,
+        name: str,
+        posts: list[PostRef],
+        *,
+        completed: bool,
+        posted_texts: list[str] | None = None,
+    ) -> None:
+        """Persist everything published so far for `name` immediately."""
+        self.platforms[name] = PlatformState(
+            posts=posts, completed=completed, posted_texts=posted_texts
+        )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"platforms": {n: s.to_json() for n, s in self.platforms.items()}}
         # Write-then-rename so a crash mid-write can't leave a half-written, unreadable

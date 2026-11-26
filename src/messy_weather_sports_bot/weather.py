@@ -158,14 +158,25 @@ def covers_game(
     reports: Sequence[WeatherReport], kickoff: dt.datetime, duration: dt.timedelta
 ) -> bool:
     """Check the union of the hourly periods for gaps across the game."""
-    intervals = sorted(
-        (dt.datetime.fromisoformat(report.starts_at), dt.datetime.fromisoformat(report.ends_at))
-        for report in reports
-        if report.starts_at is not None and report.ends_at is not None
-    )
-    covered_until = kickoff
     end = kickoff + duration
-    for start, finish in intervals:
+    intervals = []
+    for report in reports:
+        if report.starts_at is None or report.ends_at is None:
+            return False
+        start = dt.datetime.fromisoformat(report.starts_at)
+        finish = dt.datetime.fromisoformat(report.ends_at)
+        if (
+            start.utcoffset() is None
+            or finish.utcoffset() is None
+            or not start < finish
+            or start >= end
+            or finish <= kickoff
+        ):
+            return False
+        intervals.append((start, finish))
+
+    covered_until = kickoff
+    for start, finish in sorted(intervals):
         if start > covered_until:
             return False
         covered_until = max(covered_until, finish)
