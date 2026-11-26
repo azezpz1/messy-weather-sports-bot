@@ -10,7 +10,7 @@ import httpx
 from messy_weather_sports_bot.retry import request_with_retry
 from messy_weather_sports_bot.schedule import Game
 from messy_weather_sports_bot.sport import Sport
-from messy_weather_sports_bot.venues import VenueCatalog, resolve_venue
+from messy_weather_sports_bot.venues import VenueCatalog, is_confirmed_international, resolve_venue
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +32,17 @@ class EspnScoreboard:
     """A sport's ESPN scoreboard. `client` is optional - pass one to reuse a connection
     (or, in tests, to control transport); otherwise each fetch uses its own.
 
-    `verify_slate` lets the collector detect incomplete responses before replacing a
-    saved slate. An explicitly untimed game or a game on another date is still skipped.
+    With `verify_slate`, incomplete schedule responses raise an error. An explicitly
+    untimed game or a game on another date is still skipped. For sports that read
+    rankings, verified slates require a ranking field for each team.
     """
 
     def __init__(
-        self, sport: Sport, client: httpx.Client | None = None, *, verify_slate: bool = False
+        self,
+        sport: Sport,
+        client: httpx.Client | None = None,
+        *,
+        verify_slate: bool = False,
     ) -> None:
         self._sport = sport
         self._client = client
@@ -57,6 +62,8 @@ class EspnScoreboard:
         events = self._events(self._get_payload(game_day))
         limit = self._sport.event_limit
         if limit is not None and len(events) >= limit:
+            if self._verify_slate:
+                raise ValueError("ESPN scoreboard reached its request limit; games may be missing")
             logger.warning(
                 "ESPN returned %d events, the most it was asked for: games may be missing from %s",
                 len(events),
@@ -180,6 +187,8 @@ class EspnScoreboard:
             venue_id=str(venue.get("id") or ""),
             unresolved_reason=unresolved_reason,
             is_venue_drift=is_venue_drift,
+            is_international=stadium is None
+            and is_confirmed_international(venue.get("address") or {}),
             home_rank=home_rank,
             away_rank=away_rank,
             neutral_site=self._sport.parse_neutral_site and competition.get("neutralSite") is True,

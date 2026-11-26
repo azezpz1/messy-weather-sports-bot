@@ -118,7 +118,7 @@ uv run messy-weather-nfl-bot --force
 
 Every run starts by logging the installed version (e.g.
 `messy-weather-sports-bot 2.0.1 starting`), so a log - or a Healthchecks.io ping
-body - always says which release produced it. It then logs why each game found
+body - always says which release produced it. Live runs log why each game found
 for the day was included or skipped (a covered stadium, an international venue,
 an unrecognized venue, a forecast that couldn't be fetched, or weather that
 isn't messy), followed by a one-line summary. Logs go to stderr
@@ -132,10 +132,10 @@ overlapping crontab entry, or a scheduler catch-up won't repost a thread
 that already finished today. Pass `--force` to repost anyway.
 
 If a thread only partly posted (e.g. reply 2 of 3 hit a network error), a
-re-run resumes it by replying to the last post that succeeded, instead of
-starting over — the root is never posted twice. Individual `reply()` calls
-are also retried a couple of times before the thread is given up on as
-partially posted.
+rerun replies to the last post that succeeded when the current recommendations
+still match the posts already sent. If the posted portion differs, the bot reports
+a degraded run and leaves the original thread alone. Individual replies are
+retried before a thread is marked partially posted.
 
 State files live at `$XDG_STATE_HOME/messy-weather-bot/<date>.json` (or
 `~/.local/state/messy-weather-bot/<date>.json` if `XDG_STATE_HOME` isn't
@@ -145,25 +145,25 @@ own, beside it, as `<date>.cfb.json`.)
 
 ### Forecast history
 
-The first normal run creates `forecast-history.sqlite3` automatically in the
-state directory described above. Both bots append to that same file on their
-existing schedules. The account running the bots needs write access to the
-database and its directory. To use a different location, give both bots the
-same setting in the environment their cron jobs use. For example, add this
-line to their crontab with a directory writable by the cron user.
+The first collection or live publishing run creates `forecast-history.sqlite3`
+in the state directory described above. The collector and both bots use the
+same database. Accounts that fetch and save forecasts need write access to the
+file and its directory. Set `MESSY_WEATHER_DB_PATH` in each process's environment
+to use a different location. For example, add this line to the publishing crontab.
 
 ```cron
 MESSY_WEATHER_DB_PATH=/var/lib/messy-weather/forecast-history.sqlite3
 ```
 
-Dry runs, including previews for other game days, leave the database untouched.
+Dry runs, including previews for other game days, read saved forecasts without
+writing or migrating the database.
 
 The history includes supported games, venue and kickoff details, and the hourly
 forecast periods used to score each game. It records clear-weather evaluations,
-unavailable forecasts, alert lookup failures, and schedule failures. Reruns
-keep their own timestamped observations, even when the day's thread is already
-posted. The bot applies pending Alembic revisions automatically. If it cannot
-save the history, it logs a warning and continues the run.
+unavailable forecasts, alert lookup failures, and schedule failures. Live
+refreshes keep their own timestamped observations, even when the day's thread
+is already posted. The collector and live runs apply pending Alembic revisions
+automatically. Publishing continues with a warning if it cannot save history.
 
 Schema revisions live in `src/messy_weather_sports_bot/migrations/versions/`.
 Use `uv run alembic revision -m "describe the schema change"` to create a revision.
@@ -238,6 +238,30 @@ outcome. After resolving the problem, use `collect --sport nfl` or
 `collect --sport cfb` to refresh immediately. Keep the publishing cron entries
 and their existing Healthchecks in place. Store the service configuration and
 runtime database outside the repository.
+
+### Publishing from stored forecasts
+
+Both publishing bots first read the latest independent collection for their
+sport and game day. They use it when the slate covers the whole day, the
+collection started within the last 12 hours, and every supported outdoor game
+has alert data and continuous hourly forecast coverage from kickoff through the
+estimated final whistle. The bots apply the same messiness scoring, ranking and
+post formatting to saved forecasts and live forecasts. Eligible stored runs
+make no ESPN or National Weather Service requests.
+
+The bots fetch the schedule and weather live when the database is unavailable
+or the saved slate falls short of those checks. This includes collections
+made before the schema upgrade and collections whose rolling window omitted
+games that had already kicked off. The live path skips games with incomplete
+forecasts. Missing team rankings, venues or alert data mark the run as degraded
+in the existing healthcheck. A verified slate with no messy games exits
+successfully without posting.
+
+To compare saved and live previews on the same game day, run the corresponding
+bot with `--dry-run`, then repeat with `--dry-run --live`. Check for
+“Using stored … forecasts” in the first run's log to confirm the preview came
+from the collector. `--live` also works on a normal run. Existing cron commands
+can keep running without additional flags.
 
 ### Private forecast dashboard
 

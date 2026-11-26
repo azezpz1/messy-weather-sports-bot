@@ -47,6 +47,9 @@ class Game:
     espn_event_id: str | None = None
     """ESPN's stable event ID, when present."""
 
+    is_international: bool = False
+    """True if ESPN explicitly identifies an unresolved venue as outside the US."""
+
 
 def todays_game_day(sport: Sport, now: dt.datetime | None = None) -> dt.date:
     """Today's calendar date in `sport`'s game-day timezone."""

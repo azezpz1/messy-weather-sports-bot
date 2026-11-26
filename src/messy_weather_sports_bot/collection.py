@@ -6,8 +6,9 @@ import datetime as dt
 import json
 import logging
 import os
+import sqlite3
 from collections.abc import Generator, Sequence
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -45,6 +46,16 @@ class GameObservation:
 def forecast_db_path() -> Path:
     override = os.environ.get(DB_PATH_ENV_VAR)
     return Path(override) if override else state.default_state_dir() / "forecast-history.sqlite3"
+
+
+@contextmanager
+def read_database(path: Path | str) -> Generator[sqlite3.Connection]:
+    """Open an existing database and read a consistent snapshot without a write lock."""
+    uri = Path(path).absolute().as_uri() + "?mode=ro"
+    with closing(sqlite3.connect(uri, uri=True, timeout=0.5)) as db:
+        db.row_factory = sqlite3.Row
+        db.execute("BEGIN")
+        yield db
 
 
 @contextmanager
@@ -115,14 +126,15 @@ def insert_collection(
     rankings_unavailable: bool = False,
     error_type: str | None = None,
     execution_id: int | None = None,
+    publication_game_count: int | None = None,
 ) -> None:
     """Write one day's result inside the caller's transaction."""
     run = db.exec_driver_sql(
         """
         INSERT INTO collection_runs (
             sport, game_day, started_at, collected_at, outcome, games_found,
-            rankings_unavailable, error_type, execution_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            rankings_unavailable, error_type, execution_id, publication_game_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             sport,
@@ -134,6 +146,7 @@ def insert_collection(
             rankings_unavailable,
             error_type,
             execution_id,
+            publication_game_count,
         ),
     )
     for observation in observations:

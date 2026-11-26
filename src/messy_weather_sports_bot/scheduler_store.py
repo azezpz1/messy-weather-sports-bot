@@ -216,6 +216,7 @@ def save_day(execution: Execution, result: CollectedDay) -> None:
             rankings_unavailable=result.rankings_unavailable,
             error_type=result.error_type,
             execution_id=execution.id,
+            publication_game_count=result.publication_game_count,
         )
 
 

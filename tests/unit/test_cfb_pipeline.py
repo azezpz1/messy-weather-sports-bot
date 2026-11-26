@@ -167,11 +167,11 @@ def test_a_ranked_game_at_an_unrecognized_venue_is_skipped_and_logged(
     )
 
     with caplog.at_level(logging.INFO, logger=LOGGER):
-        assert run() == EXIT_OK
+        assert run() == EXIT_PARTIAL
 
     assert capsys.readouterr().out == ""
     assert 'unrecognized venue "Brand New Stadium"' in caplog.text
-    assert "No outdoor Top 25 college football games on 2026-01-18" in caplog.text
+    assert "Schedule or venue data incomplete" in caplog.text
 
 
 @respx.mock
@@ -229,7 +229,7 @@ def test_a_big_slate_with_no_ranking_fields_is_a_degraded_run_not_a_clean_one(
         exit_code = run()
 
     assert exit_code == EXIT_PARTIAL
-    assert "no rankings for any of the 8 games" in caplog.text
+    assert "a ranking this bot can't read for 8 of the 8 games" in caplog.text
 
 
 @respx.mock
@@ -245,15 +245,15 @@ def test_a_big_slate_where_everyone_is_unranked_is_still_a_clean_run(
 
 
 @respx.mock
-def test_a_small_slate_with_no_ranking_fields_is_not_enough_to_suspect_a_change(
+def test_a_small_slate_with_no_ranking_fields_is_degraded(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     mock_slate(CFB, unranked_slate(7, home_curated=MISSING, away_curated=MISSING))
 
     with caplog.at_level(logging.WARNING, logger=LOGGER):
-        assert run() == EXIT_OK
+        assert run() == EXIT_PARTIAL
 
-    assert caplog.text == ""
+    assert "a ranking this bot can't read" in caplog.text
 
 
 @respx.mock
@@ -268,19 +268,18 @@ def test_the_nfl_never_expects_rankings(caplog: pytest.LogCaptureFixture) -> Non
 
 
 @respx.mock
-def test_a_slate_where_only_some_games_lack_rankings_is_not_suspect(
+def test_a_slate_where_some_games_lack_rankings_is_degraded(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    # One game still carries its ranking field (99 = unranked): rankings are arriving, so a
-    # few games without one - say, FCS-only matchups - aren't a response change.
+    # One explicit unranked matchup cannot verify that the other teams are unranked.
     reporting = cfb_event("Home 0", "Away 0")
     others = unranked_slate(7, home_curated=MISSING, away_curated=MISSING)
     mock_slate(CFB, [reporting, *others])
 
     with caplog.at_level(logging.WARNING, logger=LOGGER):
-        assert run() == EXIT_OK
+        assert run() == EXIT_PARTIAL
 
-    assert caplog.text == ""
+    assert "a ranking this bot can't read" in caplog.text
 
 
 @respx.mock

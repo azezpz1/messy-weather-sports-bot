@@ -29,6 +29,7 @@ class CollectedDay:
     observations: tuple[GameObservation, ...] = ()
     rankings_unavailable: bool = False
     error_type: str | None = None
+    publication_game_count: int | None = None
 
 
 def collect_window(sport: Sport, now: dt.datetime) -> Iterator[CollectedDay]:
@@ -69,16 +70,14 @@ def _collect_day(
     evaluation = evaluate_games(
         sport, upcoming, get_forecast, get_active_alerts, collection_only=True
     )
-    partial = (
-        missing_rankings
-        or evaluation.games_missing > 0
-        or any(
-            obs.alerts_error_type is not None
-            or obs.outcome == "venue_unavailable"
-            or obs.detail == "partial_forecast_coverage"
-            for obs in evaluation.observations
+    partial = missing_rankings or evaluation.incomplete
+    # The rolling collection window can omit earlier kickoffs today or late ones
+    # on its last day. Only a whole slate can certify a clean publication outcome.
+    publication_game_count = None
+    if len(upcoming) == len(slate):
+        publication_game_count = sum(
+            sport.game_filter is None or sport.game_filter(game) is None for game in slate
         )
-    )
     return CollectedDay(
         game_day,
         started_at,
@@ -86,4 +85,5 @@ def _collect_day(
         len(upcoming),
         tuple(evaluation.observations),
         missing_rankings,
+        publication_game_count=publication_game_count,
     )

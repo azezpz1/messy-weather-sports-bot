@@ -25,12 +25,6 @@ from messy_weather_sports_bot.weather import (
 logger = logging.getLogger(__name__)
 
 
-RANKINGS_CHECK_MIN_GAMES = 8
-"""A slate this big with no ranking field on any game isn't an unranked slate - ESPN sends
-every team one (99 when unranked) - so rankings stopped arriving, and a run that filters
-on them would quietly never post."""
-
-
 def _weather_detail(weather: WeatherReport) -> str:
     parts = [weather.short_forecast]
     if weather.temperature_f is not None:
@@ -50,15 +44,21 @@ class Evaluation:
     the messy one, so a run that skipped any isn't a clean one."""
 
     @property
+    def incomplete(self) -> bool:
+        return self.games_missing > 0 or any(
+            observation.alerts_error_type is not None
+            or observation.outcome == "venue_unavailable"
+            or observation.detail == "partial_forecast_coverage"
+            for observation in self.observations
+        )
+
+    @property
     def messy(self) -> list[GameWeather]:
         return [gw for gw in self.evaluated if gw.is_messy]
 
 
 def rankings_missing(sport: Sport, games: list[Game]) -> bool:
-    """Whether a sport that reads rankings can't rely on them today: ESPN sent none on a
-    slate big enough to have them, or sent some this bot can't read. Either means its
-    response changed, and a filter on rankings would quietly drop games. Warns once;
-    the caller turns "nothing to post" into a degraded run rather than a clean one."""
+    """Report whether a verified slate has a missing or unreadable team ranking."""
     if not sport.parse_rankings:
         return False
     unreadable = sum(game.rankings_unreadable for game in games)
@@ -67,13 +67,6 @@ def rankings_missing(sport: Sport, games: list[Game]) -> bool:
             "There is a ranking this bot can't read for %d of the %d games on the ESPN slate; "
             "a ranking field may be missing or malformed.",
             unreadable,
-            len(games),
-        )
-        return True
-    if len(games) >= RANKINGS_CHECK_MIN_GAMES and not any(game.rankings_reported for game in games):
-        logger.warning(
-            "ESPN reported no rankings for any of the %d games on this slate, so a ranking "
-            "filter would drop them all; its response may have changed.",
             len(games),
         )
         return True
@@ -104,7 +97,11 @@ def evaluate_games(
             reason = skip_reason(game)
             if reason is not None:
                 logger.info("%s — skipped: %s", matchup, reason)
-                outcome = "venue_unavailable" if game.is_venue_drift else "skipped"
+                outcome = (
+                    "venue_unavailable"
+                    if game.stadium is None and not game.is_international
+                    else "skipped"
+                )
                 evaluation.observations.append(GameObservation(game, outcome, reason))
                 continue
 
@@ -160,23 +157,24 @@ def evaluate_games(
                 )
 
             gw = evaluate_game(game, forecasts, alerts)
-            evaluation.evaluated.append(gw)
+            full_coverage = covers_game(forecasts, game.kickoff, sport.game_duration)
             evaluation.observations.append(
                 GameObservation(
                     game,
                     "evaluated",
-                    detail=(
-                        "partial_forecast_coverage"
-                        if collection_only
-                        and not covers_game(forecasts, game.kickoff, sport.game_duration)
-                        else None
-                    ),
+                    detail=None if full_coverage else "partial_forecast_coverage",
                     forecasts=forecasts,
                     result=gw,
                     alerts_error_type=alerts_error_type,
                     observed_at=forecast_observed_at,
                 )
             )
+            if not collection_only and not full_coverage:
+                evaluation.games_missing += 1
+                logger.info("%s — skipped: incomplete forecast coverage", matchup)
+                continue
+
+            evaluation.evaluated.append(gw)
             period_word = "period" if len(forecasts) == 1 else "periods"
             logger.info(
                 "%s %s — %s: score %.1f (%s) across %d hourly %s",

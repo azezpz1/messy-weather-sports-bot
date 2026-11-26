@@ -54,6 +54,11 @@ def parse_args(sport: Sport, argv: list[str] | None = None) -> argparse.Namespac
         help="Print what would be posted instead of posting to any real platform.",
     )
     parser.add_argument(
+        "--live",
+        action="store_true",
+        help="Fetch a fresh schedule and forecasts, bypassing saved collection data.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help=(
@@ -138,7 +143,9 @@ def run_cli(sport: Sport, argv: list[str] | None = None) -> int:
         healthcheck.ping_start(healthcheck_url, run_id)
 
     try:
-        exit_code = GameDayPipeline(sport).run(platform_names, args.dry_run, args.force, args.date)
+        exit_code = GameDayPipeline(sport).run(
+            platform_names, args.dry_run, args.force, args.date, live=args.live
+        )
     except BaseException:
         # An unhandled exception means no completion ping below would ever fire -
         # Healthchecks would only notice once the run's grace period expires. Report
