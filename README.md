@@ -313,25 +313,34 @@ site block to your host, interface, and credentials.
     https://dashboard.home.arpa {
         bind <pi-lan-ip>
         tls internal
-        basic_auth {
-            <username> <password-hash>
-        }
-        reverse_proxy unix//run/messy-weather-dashboard/dashboard.sock {
-            header_up Host {hostport}
-            header_up -Authorization
+        route {
+            @browser_icons path /favicon.ico /apple-touch-icon*.png
+            respond @browser_icons 404
+
+            @dashboard not path /static/*
+            basic_auth @dashboard {
+                <username> <password-hash>
+            }
+            reverse_proxy unix//run/messy-weather-dashboard/dashboard.sock {
+                header_up Host {hostport}
+                header_up -Authorization
+            }
         }
     }
 
 Caddy 2.6 and 2.7 use `basicauth` for the same directive. Caddy 2.8 and newer
 use `basic_auth`. Restrict the HTTPS port to the trusted home network in your
-host firewall.
-Validate the Caddyfile and reload the Caddy service.
+host firewall. If the dashboard is already deployed, update its site block in
+`/etc/caddy/Caddyfile` with the routing above, keeping your host, bind address,
+and credentials. Validate the Caddyfile and reload the Caddy service.
 
     sudo caddy validate --config /etc/caddy/Caddyfile
     sudo systemctl reload caddy
 
-Caddy authenticates every browser request. Its local CA signs the dashboard
-certificate.
+Caddy requires sign-in for dashboard pages, data, and actions. Browsers can
+request the bundled CSS and JavaScript without credentials. Favicon and Apple
+touch icon requests get a plain `404`, so background icon lookups do not trigger
+another sign-in prompt. Caddy's local CA signs the dashboard certificate.
 
 - Transfer the CA's public root certificate from Caddy's
   [data directory](https://caddyserver.com/docs/automatic-https#local-https)
