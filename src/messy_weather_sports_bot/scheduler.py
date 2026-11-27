@@ -127,13 +127,11 @@ def _publish_ready(now: dt.datetime) -> ExecutionOutcome | None:
         sport = SPORTS[slug]
         try:
             with publication_lock(sport) as acquired:
-                if acquired and (
-                    execution := publication_store.claim(sport, dt.datetime.now(dt.UTC))
-                ):
+                if acquired and (execution := publication_store.claim(sport)):
                     return _run_publication(sport, execution)
         except PublicationLockError as exc:
             # Consume this attempt and notify monitoring without touching the platform.
-            if execution := publication_store.claim(sport, dt.datetime.now(dt.UTC)):
+            if execution := publication_store.claim(sport):
                 summary = str(exc)
                 _finish_publication(sport, execution, "failed", summary)
                 report_publication_status(sport, summary, EXIT_NOTHING_POSTED)

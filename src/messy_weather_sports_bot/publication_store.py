@@ -71,7 +71,7 @@ def initialize(db: Connection) -> None:
 
 def configure(
     sport: Sport,
-    now: dt.datetime,
+    now: dt.datetime | None = None,
     *,
     run_time: str,
     weekdays: Sequence[int],
@@ -84,6 +84,7 @@ def configure(
         raise ValueError("Select at least one valid weekday.")
     mask = sum(1 << day for day in set(weekdays))
     with forecast_db_transaction() as db:
+        now = now or dt.datetime.now(dt.UTC)
         current = db.exec_driver_sql(
             "SELECT run_time, weekdays, enabled, revision "
             "FROM publication_schedules WHERE sport = ?",
@@ -209,12 +210,13 @@ def _claim_slot(db: Connection, sport: Sport, now: dt.datetime, today: dt.date) 
     return None if already_claimed else _stamp(slot)
 
 
-def claim(sport: Sport, now: dt.datetime) -> Execution | None:
+def claim(sport: Sport, now: dt.datetime | None = None) -> Execution | None:
     """Claim one run under the scheduler lock. Publishing also needs the sport lock."""
-    today = sport.game_day_for(now)
-    day = today.isoformat()
-    started = _stamp(now)
     with forecast_db_transaction() as db:
+        now = now or dt.datetime.now(dt.UTC)
+        today = sport.game_day_for(now)
+        day = today.isoformat()
+        started = _stamp(now)
         _expire_requests(db, sport, now, day)
         slot = _claim_slot(db, sport, now, today)
         queued = db.exec_driver_sql(

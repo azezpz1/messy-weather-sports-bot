@@ -175,6 +175,11 @@ class GameDayPipeline:
         post_texts = build_post_texts(ranked, date, sport)
         posters = build_posters(platform_names, dry_run, sport.env_prefix)
 
+        if require_today and not dry_run and date != todays_game_day(sport):
+            logger.warning("Publication game day %s has ended.", date)
+            _log_run_summary(games_found, evaluation, [], None)
+            return EXIT_NOTHING_POSTED
+
         publication = self._publish(posters, post_texts, day_state, force)
 
         if publication.platforms_failed == len(posters):

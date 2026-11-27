@@ -59,7 +59,7 @@ def publication_lock(sport: Sport) -> Generator[bool]:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             acquired = False
-        except OSError as exc:
+        except (OSError, RuntimeError) as exc:
             raise PublicationLockError(
                 f"Publication lock unavailable ({type(exc).__name__})"
             ) from exc

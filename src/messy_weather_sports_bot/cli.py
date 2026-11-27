@@ -136,37 +136,28 @@ def run_cli(sport: Sport, argv: list[str] | None = None) -> int:
     args = parse_args(sport, argv)
     configure_logging(verbose=args.verbose, quiet=args.quiet)
     platform_names = [p.strip() for p in args.platforms.split(",") if p.strip()]
-    dry_run = args.dry_run
     # Classify implicit date previews before opening a live state lock. Keep the
     # preview flag through the run even if the date becomes today at midnight.
-    if not dry_run and args.date is not None and args.date != pipeline.todays_game_day(sport):
-        logger.warning("Previewing %s, not today; forcing --dry-run.", args.date)
-        dry_run = True
+    forced_preview = (
+        not args.dry_run and args.date is not None and args.date != pipeline.todays_game_day(sport)
+    )
+    dry_run = args.dry_run or forced_preview
+
+    def run() -> int:
+        if forced_preview:
+            logger.warning("Previewing %s, not today; forcing --dry-run.", args.date)
+        return GameDayPipeline(sport).run(
+            platform_names, dry_run, args.force, args.date, live=args.live
+        )
+
     try:
         with nullcontext(True) if dry_run else publication_lock(sport) as acquired:
             if not acquired:
                 logger.warning("%s publication is already running.", sport.name)
                 return EXIT_PARTIAL
-            return run_publication(
-                sport, platform_names, dry_run, args.force, args.date, live=args.live
-            )
+            return _monitor_publication(sport, run)
     except PublicationLockError as exc:
         return report_publication_status(sport, str(exc), EXIT_NOTHING_POSTED)
-
-
-def run_publication(
-    sport: Sport,
-    platform_names: list[str],
-    dry_run: bool,
-    force: bool = False,
-    date: dt.date | None = None,
-    *,
-    live: bool = False,
-) -> int:
-    """Run the game-day pipeline with Healthchecks. Hold the publication lock for a live run."""
-    return _monitor_publication(
-        sport, lambda: GameDayPipeline(sport).run(platform_names, dry_run, force, date, live=live)
-    )
 
 
 def run_scheduled_publication(sport: Sport, game_day: dt.date) -> int:

@@ -302,7 +302,6 @@ def create_app(secret_key: str, *, trusted_host: str | None = None) -> Flask:
         try:
             publication_store.configure(
                 sport,
-                dt.datetime.now(dt.UTC),
                 run_time=request.form.get("run_time", ""),
                 weekdays=days,
                 enabled=enabled == "1",

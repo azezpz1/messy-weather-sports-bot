@@ -1,12 +1,14 @@
 import datetime as dt
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 import respx
 
-from messy_weather_sports_bot import publication_store, scheduler, scheduler_store
+from messy_weather_sports_bot import pipeline, publication_store, scheduler, scheduler_store
 from messy_weather_sports_bot.cfb import CFB
 from messy_weather_sports_bot.collection import forecast_db_transaction
 from messy_weather_sports_bot.nfl import NFL, main
@@ -26,6 +28,32 @@ def _isolated_state(monkeypatch, tmp_path):
     monkeypatch.delenv("HEALTHCHECK_URL", raising=False)
     monkeypatch.delenv("CFB_HEALTHCHECK_URL", raising=False)
     scheduler_store.initialize(NOW)
+
+
+@pytest.fixture(autouse=True)
+def clock(monkeypatch):
+    clock = SimpleNamespace(now=NOW)
+
+    class FrozenDateTime(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock.now.astimezone(tz)
+
+    frozen = SimpleNamespace(**(vars(dt) | {"datetime": FrozenDateTime}))
+    for module in (pipeline, publication_store, scheduler):
+        monkeypatch.setattr(module, "dt", frozen)
+    monkeypatch.setattr(pipeline, "todays_game_day", lambda sport: sport.game_day_for(clock.now))
+    return clock
+
+
+def advance_when_write_lock_acquired(monkeypatch, clock, acquired_at):
+    @contextmanager
+    def transaction():
+        with forecast_db_transaction() as db:
+            clock.now = acquired_at
+            yield db
+
+    monkeypatch.setattr(publication_store, "forecast_db_transaction", transaction)
 
 
 def schedules():
@@ -149,7 +177,7 @@ def test_manual_and_due_slot_share_one_successful_game_day():
 
 @respx.mock
 def test_worker_uses_sport_healthcheck_and_defers_to_cron_lock(monkeypatch):
-    now = dt.datetime.now(dt.UTC)
+    now = NOW
     key = uuid4().hex
     monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/nfl")
     monkeypatch.setenv("CFB_HEALTHCHECK_URL", "https://hc-ping.com/cfb")
@@ -192,7 +220,7 @@ def test_worker_uses_sport_healthcheck_and_defers_to_cron_lock(monkeypatch):
 @respx.mock
 def test_scheduled_healthcheck_after_manual_completion_does_not_rerun_pipeline(monkeypatch, caplog):
     caplog.set_level(logging.INFO, logger="messy_weather_sports_bot")
-    now = dt.datetime.now(dt.UTC)
+    now = NOW
     for sport in (NFL, CFB):
         scheduler_store.configure(sport.slug, now, enabled=False)
     request(now)
@@ -221,7 +249,7 @@ def test_scheduled_healthcheck_after_manual_completion_does_not_rerun_pipeline(m
 @respx.mock
 @pytest.mark.parametrize("cron_first", [True, False])
 def test_cron_and_worker_share_the_existing_post_state(monkeypatch, cron_first):
-    now = dt.datetime.now(dt.UTC)
+    now = NOW
     day = NFL.game_day_for(now)
     poster = ConsolePoster()
 
@@ -300,7 +328,7 @@ def test_new_game_day_request_survives_previous_day_interruption():
 
 @respx.mock
 def test_due_slot_requires_fresh_confirmation_after_interrupted_manual_run(monkeypatch):
-    now = dt.datetime.now(dt.UTC)
+    now = NOW
     request(now)
     abandoned = publication_store.claim(NFL, now)
     assert abandoned is not None
@@ -324,11 +352,16 @@ def test_due_slot_requires_fresh_confirmation_after_interrupted_manual_run(monke
 
 
 @respx.mock
+@pytest.mark.parametrize("symlink_loop", [False, True])
 def test_unavailable_publication_lock_reports_failure_without_blocking_collection(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, symlink_loop
 ):
-    now = dt.datetime.now(dt.UTC)
-    (tmp_path / "state").write_text("fixture is a file, so the directory cannot be created")
+    now = NOW
+    state = tmp_path / "state"
+    if symlink_loop:
+        state.symlink_to(state.name)
+    else:
+        state.write_text("fixture is a file, so the directory cannot be created")
     request(now)
     monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/nfl")
     respx.get("https://hc-ping.com/nfl/start").respond(200)
@@ -361,7 +394,7 @@ def test_pending_manual_request_serves_the_due_slot():
 
 @respx.mock
 def test_game_day_rollover_after_claim_reports_expired_publication(monkeypatch):
-    now = dt.datetime.now(dt.UTC)
+    now = NOW
     request(now)
     next_day = NFL.game_day_for(now) + dt.timedelta(days=1)
     monkeypatch.setattr("messy_weather_sports_bot.pipeline.todays_game_day", lambda sport: next_day)
@@ -372,3 +405,56 @@ def test_game_day_rollover_after_claim_reports_expired_publication(monkeypatch):
     assert scheduler.run_once() == "failed"
     assert end.called
     assert executions()[0].failure_summary == "Bot exited with code 1"
+
+
+def test_schedule_edit_selects_a_slot_after_acquiring_the_write_lock(monkeypatch, clock):
+    slot = NOW + dt.timedelta(hours=1)
+    clock.now = slot - dt.timedelta(milliseconds=100)
+    advance_when_write_lock_acquired(monkeypatch, clock, slot + dt.timedelta(milliseconds=100))
+
+    publication_store.configure(
+        NFL, run_time="10:00", weekdays=tuple(range(7)), enabled=True, expected_revision=0
+    )
+
+    assert dt.datetime.fromisoformat(schedules()["nfl"].next_due) == slot + dt.timedelta(days=1)
+
+
+@respx.mock
+def test_request_that_expires_while_waiting_for_the_write_lock_is_not_published(monkeypatch, clock):
+    for sport in (NFL, CFB):
+        scheduler_store.configure(sport.slug, NOW, enabled=False)
+    request()
+    expiry = NOW + dt.timedelta(minutes=publication_store.REQUEST_TTL_MINUTES)
+    clock.now = expiry - dt.timedelta(milliseconds=100)
+    advance_when_write_lock_acquired(monkeypatch, clock, expiry + dt.timedelta(milliseconds=100))
+
+    assert scheduler.run_once() is None
+    assert executions()[0].outcome == "expired"
+
+
+@respx.mock
+def test_worker_rechecks_the_game_day_after_logging_in_to_the_poster(monkeypatch, clock):
+    day = NFL.game_day_for(NOW)
+    request()
+    poster = ConsolePoster()
+
+    def build_posters(*args):
+        clock.now = dt.datetime.combine(
+            day + dt.timedelta(days=1), dt.time(), NFL.game_day_timezone
+        ).astimezone(dt.UTC)
+        return [poster]
+
+    monkeypatch.setattr(pipeline, "build_posters", build_posters)
+    respx.get(NFL.scoreboard_url).respond(
+        json={"events": [espn_event("GB", "CHI", kickoff=f"{day}T13:00:00-05:00")]}
+    )
+    stadium = stadium_for_team("GB")
+    mock_hourly_forecast(
+        stadium.latitude,
+        stadium.longitude,
+        response=forecast_response("Heavy Snow", 27, "15 mph", 90, day=day.isoformat()),
+    )
+
+    assert scheduler.run_once() == "failed"
+    assert not poster.posted
+    assert executions()[0].outcome == "failed"
