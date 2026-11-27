@@ -69,14 +69,7 @@ Note the two different names: the checkout directory is
 `messy-weather-sports-bot` (the repo's name), while the commands it installs are
 `messy-weather-nfl-bot` and `messy-weather-cfb-bot`. The installed package (and so the version line that
 starts every run's log) also uses the repo's name, `messy-weather-sports-bot`,
-not the command's - match on that if you grep logs for the version line. Paths
-in crontab entries below need the directory name. A `cd` into a nonexistent
-`messy-weather-nfl-bot` (or `-cfb-bot`) directory fails before the command after it runs, and a
-`>> log 2>&1` at the end of the entry only captures that later command - so the
-failure never reaches the log, and an update job pointed at the wrong directory
-goes unnoticed while the checkout your posts run from never updates. The update
-entry below groups the whole command under one redirect, to a log outside the
-checkout, so a failed `cd` is logged too.
+not the command's - match on that if you grep logs for the version line.
 
 ## Configuration
 
@@ -129,7 +122,9 @@ with timestamps, so they're readable from cron/journald logs.
 The bot keeps a small per-day, per-platform state file recording the posts it
 has published successfully, so it's safe to re-run — a manual retry, an
 overlapping crontab entry, or a scheduler catch-up won't repost a thread
-that already finished today. Pass `--force` to repost anyway.
+that already finished today. Live commands and worker runs sharing the same
+state directory also take a per-sport lock before evaluating or posting.
+Pass `--force` to bypass the completed-thread check.
 
 If a thread only partly posted (e.g. reply 2 of 3 hit a network error), a
 rerun replies to the last post that succeeded when the current recommendations
@@ -149,9 +144,9 @@ The first collection or live publishing run creates `forecast-history.sqlite3`
 in the state directory described above. The collector and both bots use the
 same database. Accounts that fetch and save forecasts need write access to the
 file and its directory. Set `MESSY_WEATHER_DB_PATH` in each process's environment
-to use a different location. For example, add this line to the publishing crontab.
+to use a different location. For example, set this in the worker environment file.
 
-```cron
+```ini
 MESSY_WEATHER_DB_PATH=/var/lib/messy-weather/forecast-history.sqlite3
 ```
 
@@ -209,7 +204,7 @@ be able to write to the database and its parent directory.
 
 ```ini
 [Unit]
-Description=Messy weather forecast collector
+Description=Messy weather collection and publishing worker
 Wants=network-online.target
 After=network-online.target
 
@@ -218,6 +213,7 @@ Type=simple
 User=collector
 WorkingDirectory=/path/to/messy-weather-sports-bot
 Environment=MESSY_WEATHER_DB_PATH=/var/lib/messy-weather/forecast-history.sqlite3
+# Add EnvironmentFile=/path/to/worker.env before enabling publishing.
 ExecStart=/path/to/uv run --locked messy-weather-collector worker
 Restart=on-failure
 RestartSec=15
@@ -235,8 +231,7 @@ journalctl -u messy-weather-collector.service -n 50
 
 If a run fails, check the journal and `schedule status` for the recorded
 outcome. After resolving the problem, use `collect --sport nfl` or
-`collect --sport cfb` to refresh immediately. Keep the publishing cron entries
-and their existing Healthchecks in place. Store the service configuration and
+`collect --sport cfb` to refresh immediately. Store the service configuration and
 runtime database outside the repository.
 
 ### Publishing from stored forecasts
@@ -260,17 +255,16 @@ successfully without posting.
 To compare saved and live previews on the same game day, run the corresponding
 bot with `--dry-run`, then repeat with `--dry-run --live`. Check for
 “Using stored … forecasts” in the first run's log to confirm the preview came
-from the collector. `--live` also works on a normal run. Existing cron commands
-can keep running without additional flags.
+from the collector. `--live` also works on a standalone publishing run.
 
 ### Private forecast dashboard
 
 The dashboard shows the collector's next seven days on separate NFL and Top 25
 CFB tabs. Sort games by messiness or kickoff, filter by date or precipitation
 type, and open a matchup for its hourly forecast and saved observations. It uses
-the same scoring rules as the publishing bots. **Tasks** manages the two
-collection schedules and manual refreshes. **Data** browses the stored forecast
-and scheduler tables in read-only mode.
+the same scoring rules as the publishing bots. **Tasks** manages independent collection and publishing schedules, manual runs,
+and execution history. **Data** browses the stored forecast and scheduler tables
+in read-only mode.
 
 Run the [independent collector](#independent-forecast-collection) first to apply
 the database migrations and populate schedules. The dashboard, collector, and
@@ -394,7 +388,7 @@ Playwright's `install --with-deps` flag also installs system libraries on Linux.
 ### Failure alerting with Healthchecks.io
 
 The bot's own logs only help if something reads them. Since it normally runs
-unattended from cron, a silent failure — bad credentials, an API change, the
+unattended, a silent failure — bad credentials, an API change, the
 Pi being off — can go unnoticed for weeks. [Healthchecks.io](https://healthchecks.io)
 is a free "dead man's switch": the bot pings it on every run, and *you* get
 alerted if an expected ping doesn't show up, not just when the bot itself
@@ -404,12 +398,13 @@ To set it up:
 
 1. Create a free Healthchecks.io account (or [self-host it](https://github.com/healthchecks/healthchecks)
    somewhere other than the Pi it's watching).
-2. Add a check using the **same cron schedule and timezone as your crontab**
-   (e.g. `0 9 * * 0,1,4` in `America/New_York`), with a grace period (e.g. 60
+2. Add a check using the **same days, time, and timezone as the publishing schedule**
+   (the daily default is `0 10 * * *` in `America/New_York`), with a grace period (e.g. 60
    minutes) to allow for a slow run.
 3. Connect an alert channel (email, Discord, Slack, ntfy, Pushover, etc.).
 4. Copy the check's ping URL (`https://hc-ping.com/<uuid>`) into
-   `HEALTHCHECK_URL`, in your crontab or `.env`.
+   `HEALTHCHECK_URL` in the worker's environment file. Use
+   `CFB_HEALTHCHECK_URL` for the separate CFB check.
 
 With `HEALTHCHECK_URL` set, the bot pings `{url}/start` when a run begins and
 `{url}/{exit_code}` when it ends (carrying the run summary and log tail as
@@ -458,8 +453,8 @@ fallback could post college games to the NFL account).
 
 Its post state is kept beside the NFL's as `<date>.cfb.json` (the NFL's stays
 `<date>.json`), so the two never mistake each other's thread for their own. Give
-it its own Healthchecks check, with the schedule and timezone of its own crontab
-entry.
+it its own Healthchecks check, with the days, time, and timezone of its publishing
+schedule.
 
 Notes:
 
@@ -478,33 +473,72 @@ Notes:
 
 ## Running on a schedule (e.g. a Raspberry Pi)
 
-This script doesn't schedule itself — run it via cron (or any scheduler) on
-game mornings. It's a no-op (exits cleanly, posts nothing) on days with no
-outdoor NFL games, so it's safe to run daily if you'd rather not maintain a
-precise NFL schedule in your crontab. A typical crontab entry, run at 9am on
-Thursdays, Sundays, and Mondays:
+The `messy-weather-collector worker` systemd service runs forecasts and
+publishing even while the dashboard is offline. In **Tasks → Publishing
+schedules**, set each sport's weekdays, time, and Enabled or Paused status.
+Both start paused with a daily time of 10 a.m. Eastern (9 a.m. Central).
+The time follows each sport's game-day timezone. Enabling or editing a
+schedule uses the next future slot. If the worker is down, it can catch up
+on the current game day and skips previous days. During daylight saving
+changes, an ambiguous time uses the first occurrence and a missing time
+moves forward by the clock change.
 
-```cron
-# m h  dom mon dow          command
-0  9   *   *   0,1,4        cd /path/to/messy-weather-sports-bot && uv run messy-weather-nfl-bot
-```
+**Publish this game day** requires confirming the sport and date before the
+dashboard queues a live run. Manual runs work while the recurring schedule
+is paused. The worker runs one job at a time and checks pending publishing
+work before starting another collection. A request expires after 15 minutes
+or at local midnight, whichever comes first. A queued run can satisfy a
+scheduled run due for the same sport. If an earlier manual run already
+succeeded that day, the scheduled slot still reports success to Healthchecks
+and shows **Skipped** in the history. If the earlier run failed, was partial,
+or was interrupted, the scheduled slot reports that failure and leaves the
+retry to an operator. A clean day without a recommendation counts as a success.
 
-The college football bot needs its own entry. Bowl games and the playoff land on
-arbitrary weekdays, and it is a no-op on any day without a messy ranked game, so
-run it daily through the season (August to January):
+### Move publishing from cron to the worker
 
-```cron
-# m h  dom mon dow          command
-0  9   *   8-12,1   *        cd /path/to/messy-weather-sports-bot && uv run messy-weather-cfb-bot
-```
+1. Back up the crontab, forecast database, and publication state directory.
+   Upgrade the worker, dashboard, and checkout used by cron to the same
+   release while both publishing schedules are paused. Start the worker
+   first so it upgrades the database, then start the dashboard.
+2. Add the worker's `EnvironmentFile=` and use a private file outside the
+   repository. Set the publishing credentials and Healthchecks URL for each
+   sport using the [NFL](#configuration) and [CFB](#college-football-top-25)
+   variable names. Set `MESSY_WEATHER_STATE_DIR` in the worker and legacy
+   commands to the same absolute directory. Use the same service account or
+   ensure both can write that directory and its files. Keep the worker and
+   dashboard on the same `MESSY_WEATHER_DB_PATH`. Reload systemd and restart
+   the worker after editing the unit. Keep cron and the worker on the same host
+   during cutover so the publication lock protects both.
+3. Use the worker's environment to preview both bot commands with
+   `--dry-run` and both Healthchecks URL variables cleared for the preview.
+   Confirm the forecast result and the game-day date in the logs.
+4. Enable one sport and observe a **Scheduled** run in the dashboard and
+   worker journal before removing that sport's cron entry. Pick a slot away
+   from the legacy firing time and match the sport's Healthchecks days, time,
+   and timezone. Verify the check-in and the expected Bluesky result. An
+   empty or pleasant slate should complete without a post. During the overlap
+   window the upgraded commands share a per-sport lock and reuse saved thread
+   progress. Never use `--force` during cutover. Repeat for the other sport.
+5. Remove any legacy collection cron entries after confirming independent
+   collection runs in the worker. Leave systemd enabled so schedules survive
+   a restart.
 
-Cron does not load your shell profile or `.env` files automatically, so
-`BLUESKY_HANDLE`, `BLUESKY_APP_PASSWORD`, and `HEALTHCHECK_URL` (and the `CFB_`
-versions the college bot reads) won't be set
-unless you provide them explicitly: set them directly in the crontab, or in
-a wrapper script that exports them before invoking `uv`. If you're using
-Healthchecks.io, match the check's schedule and timezone to whatever cron
-expression you use here.
+### Recover a publishing run
+
+- Check **Publishing executions**, the worker journal (`journalctl -u
+  messy-weather-collector.service`), and the sport's Healthchecks check.
+  A process exit leaves an **Interrupted** execution. The worker does not
+  automatically retry a claimed slot.
+- After correcting a failed or partial run, confirm a new request for the
+  same game day. The bot can resume a partial thread from its saved refs
+  when the already-posted text matches. For an interruption, an ambiguous
+  Bluesky response, or a state write error, inspect the live thread and
+  saved state before retrying. Keep the state directory across restarts and
+  upgrades.
+- To return a sport to cron, pause its schedule, wait for running or queued
+  publishing work to settle, then restore that sport's cron entry and
+  Healthchecks schedule. Continue using the upgraded bot and the same state
+  directory. Scheduled collection and the other sport can keep running.
 
 ### Updating to the latest release
 
@@ -530,27 +564,12 @@ This asks GitHub for the latest *published* release rather than just the
 newest tag, since a repo could in principle have tags that were never turned
 into a release, then checks out that tag and runs `uv sync`.
 
-If the checkout is also used by a running collector or dashboard, coordinate
-updates outside the publishing window. Remove the updater from any publishing
-wrapper and remove any standalone updater cron entry. Keep the publishing
-cron commands. Stop the collector and dashboard, run the updater, then start
-the collector first so it can migrate the database. Start the dashboard
-after the collector is ready.
-
-For a publishing-only checkout, you can run the updater before your scheduled
-job, such as from the wrapper your crontab invokes. If you hit GitHub's
-unauthenticated API rate limit, set a `GITHUB_TOKEN` env var (no special
-permissions needed) and the script will use it.
-
-For a publishing-only checkout, you can also schedule the updater separately —
-for example, Saturday at midnight so it's ready before the Sunday morning
-run:
-
-```cron
-# m h  dom mon dow          command
-0  0   *   *   6            { cd /path/to/messy-weather-sports-bot && ./scripts/update-to-latest-release.sh; } >> $HOME/messy-weather-update.log 2>&1
-0  9   *   *   0,1,4        cd /path/to/messy-weather-sports-bot && uv run messy-weather-nfl-bot
-```
+Coordinate updates outside the publishing window. Stop the worker and
+dashboard, run the updater, then restart the worker so it can migrate the
+database. Start the dashboard after the worker is ready. Keep the database
+and publication state outside the checkout. If the GitHub API rate limit
+blocks update checks, the updater can read a `GITHUB_TOKEN` from the
+environment.
 
 ## Development
 

@@ -11,11 +11,18 @@ import io
 import logging
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 
-from messy_weather_sports_bot import healthcheck
-from messy_weather_sports_bot.pipeline import EXIT_NOTHING_POSTED, GameDayPipeline
+from messy_weather_sports_bot import healthcheck, pipeline
+from messy_weather_sports_bot.pipeline import (
+    EXIT_NOTHING_POSTED,
+    EXIT_OK,
+    EXIT_PARTIAL,
+    GameDayPipeline,
+)
 from messy_weather_sports_bot.sport import Sport
+from messy_weather_sports_bot.state import PublicationLockError, publication_lock
 
 # The package's own logger: every module logs under it (their `getLogger(__name__)`
 # loggers are its children), so handlers attached here - including the in-memory one
@@ -127,36 +134,85 @@ def running_version() -> str | None:
 
 def run_cli(sport: Sport, argv: list[str] | None = None) -> int:
     args = parse_args(sport, argv)
-    log_buffer = io.StringIO()
-    configure_logging(
-        verbose=args.verbose, quiet=args.quiet, extra_handlers=[logging.StreamHandler(log_buffer)]
-    )
-    # First, so every run's log - and the healthcheck body built from it, even after a
-    # crash - says which release produced it.
-    version = running_version()
-    logger.info("%s %s starting", DISTRIBUTION_NAME, version if version else "(unknown version)")
+    configure_logging(verbose=args.verbose, quiet=args.quiet)
     platform_names = [p.strip() for p in args.platforms.split(",") if p.strip()]
-
-    healthcheck_url = os.environ.get(healthcheck.env_var_name(sport.env_prefix))
-    run_id = healthcheck.new_run_id()
-    if healthcheck_url:
-        healthcheck.ping_start(healthcheck_url, run_id)
-
+    dry_run = args.dry_run
+    # Classify implicit date previews before opening a live state lock. Keep the
+    # preview flag through the run even if the date becomes today at midnight.
+    if not dry_run and args.date is not None and args.date != pipeline.todays_game_day(sport):
+        logger.warning("Previewing %s, not today; forcing --dry-run.", args.date)
+        dry_run = True
     try:
-        exit_code = GameDayPipeline(sport).run(
-            platform_names, args.dry_run, args.force, args.date, live=args.live
+        with nullcontext(True) if dry_run else publication_lock(sport) as acquired:
+            if not acquired:
+                logger.warning("%s publication is already running.", sport.name)
+                return EXIT_PARTIAL
+            return run_publication(
+                sport, platform_names, dry_run, args.force, args.date, live=args.live
+            )
+    except PublicationLockError as exc:
+        return report_publication_status(sport, str(exc), EXIT_NOTHING_POSTED)
+
+
+def run_publication(
+    sport: Sport,
+    platform_names: list[str],
+    dry_run: bool,
+    force: bool = False,
+    date: dt.date | None = None,
+    *,
+    live: bool = False,
+) -> int:
+    """Run the game-day pipeline with Healthchecks. Hold the publication lock for a live run."""
+    return _monitor_publication(
+        sport, lambda: GameDayPipeline(sport).run(platform_names, dry_run, force, date, live=live)
+    )
+
+
+def run_scheduled_publication(sport: Sport, game_day: dt.date) -> int:
+    """Run a claimed game day with the sport lock held."""
+    return _monitor_publication(
+        sport,
+        lambda: GameDayPipeline(sport).run(
+            ["bluesky"], dry_run=False, date=game_day, require_today=True
+        ),
+    )
+
+
+def report_publication_status(sport: Sport, message: str, code: int) -> int:
+    """Send the slot's Healthchecks ping when the worker cannot or need not run the pipeline."""
+
+    def report() -> int:
+        logger.log(logging.INFO if code == EXIT_OK else logging.WARNING, "%s", message)
+        return code
+
+    return _monitor_publication(sport, report)
+
+
+def _monitor_publication(sport: Sport, run: Callable[[], int]) -> int:
+    log_buffer = io.StringIO()
+    handler = logging.StreamHandler(log_buffer)
+    handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    logger.addHandler(handler)
+    try:
+        version = running_version()
+        logger.info(
+            "%s %s starting", DISTRIBUTION_NAME, version if version else "(unknown version)"
         )
-    except BaseException:
-        # An unhandled exception means no completion ping below would ever fire -
-        # Healthchecks would only notice once the run's grace period expires. Report
-        # the failure immediately instead, then let the exception keep propagating.
+        healthcheck_url = os.environ.get(healthcheck.env_var_name(sport.env_prefix))
+        run_id = healthcheck.new_run_id()
         if healthcheck_url:
-            body = f"exit code: unhandled exception\n\n{log_buffer.getvalue()}"
-            healthcheck.ping_end(healthcheck_url, run_id, EXIT_NOTHING_POSTED, body)
-        raise
-
-    if healthcheck_url:
-        body = f"exit code: {exit_code}\n\n{log_buffer.getvalue()}"
-        healthcheck.ping_end(healthcheck_url, run_id, exit_code, body)
-
-    return exit_code
+            healthcheck.ping_start(healthcheck_url, run_id)
+        try:
+            exit_code = run()
+        except BaseException:
+            if healthcheck_url:
+                body = f"exit code: unhandled exception\n\n{log_buffer.getvalue()}"
+                healthcheck.ping_end(healthcheck_url, run_id, EXIT_NOTHING_POSTED, body)
+            raise
+        if healthcheck_url:
+            body = f"exit code: {exit_code}\n\n{log_buffer.getvalue()}"
+            healthcheck.ping_end(healthcheck_url, run_id, exit_code, body)
+        return exit_code
+    finally:
+        logger.removeHandler(handler)

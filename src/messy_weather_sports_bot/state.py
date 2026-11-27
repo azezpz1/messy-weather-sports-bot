@@ -14,12 +14,16 @@ construct a `DayState` when actually posting for real.
 from __future__ import annotations
 
 import datetime as dt
+import fcntl
 import json
 import logging
 import os
+from collections.abc import Generator
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 from messy_weather_sports_bot.poster.base import PostRef
+from messy_weather_sports_bot.sport import Sport
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,31 @@ def default_state_dir() -> Path:
     xdg_state_home = os.environ.get("XDG_STATE_HOME")
     base = Path(xdg_state_home) if xdg_state_home else Path.home() / ".local" / "state"
     return base / _APP_DIR_NAME
+
+
+class PublicationLockError(OSError):
+    """A live run could not open or lock the publication state directory."""
+
+
+@contextmanager
+def publication_lock(sport: Sport) -> Generator[bool]:
+    """Serialize the sport's CLI and worker runs against the same publication state."""
+    with ExitStack() as files:
+        try:
+            directory = default_state_dir().resolve()
+            directory.mkdir(parents=True, exist_ok=True)
+            suffix = f".{sport.state_key}" if sport.state_key else ""
+            lock = files.enter_context((directory / f"publication{suffix}.lock").open("a"))
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            acquired = False
+        except OSError as exc:
+            raise PublicationLockError(
+                f"Publication lock unavailable ({type(exc).__name__})"
+            ) from exc
+        else:
+            acquired = True
+        yield acquired
 
 
 def state_file_path(

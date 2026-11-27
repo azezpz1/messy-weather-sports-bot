@@ -1,16 +1,18 @@
 {% extends 'base.html' %}
-{% block title %}Collection tasks · Messy Weather{% endblock %}
+{% block title %}Tasks · Messy Weather{% endblock %}
 {% block scripts %}
   <script defer src="{{ url_for('static', filename='vendor/htmx-2.0.11.min.js') }}"></script>
   <script defer src="{{ url_for('static', filename='task-history.js') }}"></script>
 {% endblock %}
 {% block content %}
-  <h1>Collection tasks</h1>
-  {% if not schedules %}<p class="notice">Start the collector to initialize the schedules.</p>{% endif %}
+  <h1>Tasks</h1>
+  {% if not schedules %}<p class="notice">Start the worker to initialize the schedules.</p>{% endif %}
+  {% include 'publication_tasks.html' %}
+  <h2>Collection schedules</h2>
   <div class="task-grid">
     {% for schedule in schedules %}
       <section class="panel" id="{{ schedule.sport }}-schedule">
-        <h2>{{ sport_names[schedule.sport] }}</h2>
+        <h3>{{ sport_names[schedule.sport] }}</h3>
         <dl class="metadata">
           <dt>Next run</dt><dd>{{ schedule.next_due|timestamp(schedule.sport) if schedule.enabled else 'Paused' }}</dd>
         </dl>

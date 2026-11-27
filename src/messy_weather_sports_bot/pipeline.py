@@ -111,11 +111,15 @@ class GameDayPipeline:
         date: dt.date | None = None,
         *,
         live: bool = False,
+        require_today: bool = False,
     ) -> int:
         sport = self.sport
         today = todays_game_day(sport)
         date = date or today
         if date != today and not dry_run:
+            if require_today:
+                logger.warning("Publication game day %s has ended.", date)
+                return EXIT_NOTHING_POSTED
             logger.warning("Previewing %s, not today; forcing --dry-run.", date.isoformat())
             dry_run = True
         started_at = dt.datetime.now(dt.UTC)

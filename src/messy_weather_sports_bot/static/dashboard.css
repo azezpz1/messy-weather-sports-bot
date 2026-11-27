@@ -52,9 +52,13 @@ main.shell { padding-bottom: 3rem; }
 .filters, .schedule-form { display: flex; flex-wrap: wrap; gap: .8rem; align-items: end; }
 .filters { margin-bottom: 1rem; }
 .schedule-form { margin: 1rem 0; }
+.publication-days { flex-basis: 100%; min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.publication-days legend { padding: 0; font-size: .875rem; font-weight: 650; }
+.weekday-options { display: flex; flex-wrap: wrap; column-gap: .65rem; }
+.publication-manual { border-top: 1px solid var(--edge); padding-top: .75rem; }
 label { display: grid; gap: .2rem; font-size: .875rem; font-weight: 650; }
 .check { display: flex; align-items: center; gap: .35rem; min-height: 2.75rem; }
-button, select, input[type="number"] {
+button, select, input[type="number"], input[type="time"] {
   min-height: 2.75rem;
   border: 1px solid #9eafbe;
   border-radius: .35rem;

@@ -84,6 +84,19 @@ RAW_TABLES = {
         "failure_summary",
     ),
     "collection_refresh_requests": ("id", "sport", "requested_at", "execution_id"),
+    "publication_schedules": ("sport", "run_time", "weekdays", "enabled", "next_due", "revision"),
+    "publication_executions": (
+        "id",
+        "sport",
+        "game_day",
+        "trigger",
+        "requested_at",
+        "scheduled_for",
+        "started_at",
+        "finished_at",
+        "outcome",
+        "failure_summary",
+    ),
 }
 _RAW_TABLE_IDENTIFIERS = {table: f'"{table}"' for table in RAW_TABLES}
 PRECIPITATION = ("rain", "snow", "ice", "thunderstorms")
@@ -388,6 +401,22 @@ def recent_executions(db: sqlite3.Connection, limit: int = 25) -> list[Row]:
     return [{**execution, "days": days.get(execution["id"], [])} for execution in executions]
 
 
+def publication_tasks(db: sqlite3.Connection) -> list[Row]:
+    return _rows(db, "SELECT * FROM publication_schedules ORDER BY sport")
+
+
+def recent_publications(db: sqlite3.Connection) -> list[Row]:
+    return _rows(
+        db,
+        """
+        SELECT id, sport, game_day, trigger, requested_at, scheduled_for, started_at,
+               finished_at, outcome, failure_summary
+        FROM publication_executions
+        ORDER BY outcome IN ('queued', 'running') DESC, id DESC LIMIT 25
+        """,
+    )
+
+
 def _raw_table(table: str) -> tuple[str, tuple[str, ...]]:
     if table not in RAW_TABLES:
         raise ValueError("Unknown data table")
@@ -431,7 +460,7 @@ def browse_table(
 
 def read_row(db: sqlite3.Connection, table: str, key: str, index: int | None = None) -> Row | None:
     table_identifier, columns = _raw_table(table)
-    if table == "collection_schedules":
+    if table in {"collection_schedules", "publication_schedules"}:
         value: str | int = key
     else:
         if not key.isascii() or not key.isdecimal() or len(key) > 19:

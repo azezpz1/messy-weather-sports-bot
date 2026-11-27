@@ -23,8 +23,10 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     commands = parser.add_subparsers(dest="command", required=True)
     collect = commands.add_parser("collect", help="Refresh a sport now")
     collect.add_argument("--sport", required=True, choices=sorted(SPORTS))
-    commands.add_parser("worker", help="Run the recurring collection worker")
-    schedule = commands.add_parser("schedule", help="Inspect or change a recurring schedule")
+    commands.add_parser("worker", help="Run the collection and publishing worker")
+    schedule = commands.add_parser(
+        "schedule", help="Inspect or change a recurring collection schedule"
+    )
     actions = schedule.add_subparsers(dest="action", required=True)
     actions.add_parser("status", help="Show schedules and latest executions as JSON")
     interval = actions.add_parser("set-interval", help="Set the interval in whole hours")
@@ -64,6 +66,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     except (OSError, SQLAlchemyError, CommandError) as exc:
-        logger.error("Collection storage unavailable (%s)", type(exc).__name__)
+        logger.error("Scheduler storage unavailable (%s)", type(exc).__name__)
         return 1
     return 0

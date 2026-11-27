@@ -134,6 +134,16 @@ def test_filter_games_and_manage_a_refresh(dashboard_url, engine, device):
             assert opened.get_attribute("id") == opened_id
             expect(opened.locator("summary")).to_be_focused()
 
+            publishing = page.locator("#nfl-publication")
+            expect(publishing.get_by_label("Time (America/New_York)")).to_have_value("10:00")
+            publishing.get_by_label("Time (America/New_York)").fill("09:15")
+            publishing.get_by_role("button", name="Save publishing schedule").click()
+            expect(publishing.get_by_label("Time (America/New_York)")).to_have_value("09:15")
+            publishing.get_by_text("Publish this game day", exact=True).click()
+            publishing.get_by_role("checkbox", name="Confirm NFL publishing", exact=False).check()
+            publishing.get_by_role("button", name="Queue publishing").click()
+            expect(page.locator("#run-status").get_by_text("Queued", exact=True)).to_be_visible()
+
             page.get_by_role("link", name="Data", exact=True).click()
             page.get_by_role("link", name="Hourly forecast periods").click()
             page.get_by_role("link", name="Open row").first.click()
