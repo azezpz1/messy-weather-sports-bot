@@ -4,7 +4,7 @@ import re
 import pytest
 
 from messy_weather_sports_bot import scheduler_store
-from messy_weather_sports_bot.collection import GameObservation
+from messy_weather_sports_bot.collection import GameObservation, forecast_db_transaction
 from messy_weather_sports_bot.collector import CollectedDay
 from messy_weather_sports_bot.dashboard import create_app
 from messy_weather_sports_bot.messiness import evaluate_game
@@ -143,3 +143,57 @@ def test_https_forms_require_same_origin_and_trusted_host(dashboard):
         ).status_code
         == 303
     )
+
+
+def test_publishing_schedule_can_enable_edit_and_pause_independently(dashboard):
+    response = dashboard.get("/admin/tasks")
+    assert b"Publishing schedules" in response.data
+    assert b'value="10:00"' in response.data
+    token = csrf_token(response)
+    url = "/admin/tasks/nfl/publication-schedule"
+    form = {
+        "csrf_token": token,
+        "revision": 0,
+        "run_time": "24:00",
+        "weekdays": ["0", "3", "6"],
+        "enabled": "1",
+    }
+    assert dashboard.post(url, data=form).status_code == 400
+    form["run_time"] = "08:30"
+    assert dashboard.post(url, data=form).status_code == 303
+    assert dashboard.post(url, data=form).status_code == 409
+    form.update(revision=1, enabled="0")
+    assert dashboard.post(url, data=form).status_code == 303
+    with forecast_db_transaction() as db:
+        assert db.exec_driver_sql(
+            "SELECT sport, run_time, enabled, revision FROM publication_schedules ORDER BY sport"
+        ).all() == [("cfb", "10:00", 0, 0), ("nfl", "08:30", 0, 2)]
+    assert all(row["enabled"] for row in scheduler_store.status())
+
+
+def test_manual_publication_requires_confirmation_for_current_game_day(dashboard):
+    url = "/admin/tasks/nfl/publish"
+    page = dashboard.get("/admin/tasks")
+    request_key = re.search(rb'name="request_key" value="([a-f0-9]{32})"', page.data)
+    assert request_key is not None
+    day = NFL.game_day_for(dt.datetime.now(dt.UTC))
+    form = {
+        "game_day": (day - dt.timedelta(days=1)).isoformat(),
+        "request_key": request_key.group(1).decode(),
+        "confirm": "1",
+    }
+    assert dashboard.post(url, data=form).status_code == 400
+    form["csrf_token"] = csrf_token(page)
+    assert dashboard.post(url, data=form).status_code == 400
+    form["game_day"] = day.isoformat()
+    form.pop("confirm")
+    assert dashboard.post(url, data=form).status_code == 400
+    form["confirm"] = "1"
+    for _ in range(2):
+        assert dashboard.post(url, data=form).status_code == 303
+
+    status = dashboard.get("/admin/tasks/status").data
+    assert b"Publishing executions" in status
+    assert b"Queued" in status
+    assert b'hx-trigger="every 5s"' in status
+    assert b"1 row" in dashboard.get("/admin/data/publication_executions").data

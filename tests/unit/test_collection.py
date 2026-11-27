@@ -219,11 +219,11 @@ def test_schema_upgrade_keeps_history_and_rolls_back_a_failed_migration(
     migrations = tmp_path / "migrations"
     shutil.copytree(Path(collection.__file__).with_name("migrations"), migrations)
     monkeypatch.setattr(collection, "_MIGRATION_LOCATION", str(migrations))
-    revision = migrations / "versions" / "0005_source.py"
+    revision = migrations / "versions" / "0006_source.py"
     script = """from alembic import op
 
-revision = "0005_source"
-down_revision = "0004_publication_slates"
+revision = "0006_source"
+down_revision = "0005_publication_schedules"
 branch_labels = None
 depends_on = None
 
@@ -239,7 +239,7 @@ def upgrade():
     poster.post_thread.assert_called_once()
     with closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0004_publication_slates",
+            "0005_publication_schedules",
         )
         assert db.execute("SELECT sport FROM collection_runs").fetchall() == [("nfl",)]
         assert "source" not in {
@@ -249,7 +249,7 @@ def upgrade():
     revision.write_text(script)
     collection.record_collection("cfb", DAY, started, "complete", 0)
     with closing(sqlite3.connect(path)) as db:
-        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0005_source",)
+        assert db.execute("SELECT version_num FROM alembic_version").fetchone() == ("0006_source",)
         assert db.execute("SELECT sport, source FROM collection_runs ORDER BY id").fetchall() == [
             ("nfl", "espn"),
             ("cfb", "espn"),
@@ -278,7 +278,7 @@ def test_scheduler_migration_preserves_previous_forecast_history(
     collection.record_collection("cfb", DAY, started, "complete", 0)
     with closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0004_publication_slates",
+            "0005_publication_schedules",
         )
         assert db.execute(
             "SELECT sport, execution_id FROM collection_runs ORDER BY id"
@@ -295,7 +295,8 @@ def test_scheduler_migration_preserves_previous_forecast_history(
 
 
 @pytest.mark.parametrize(
-    "previous_revision", ["0002_collection_scheduler", "0003_dashboard_refresh_requests"]
+    "previous_revision",
+    ["0002_collection_scheduler", "0003_dashboard_refresh_requests", "0004_publication_slates"],
 )
 def test_migrations_preserve_scheduler_observations(tmp_path: Path, previous_revision: str) -> None:
     started = dt.datetime(2026, 11, 21, 18, tzinfo=dt.UTC)
@@ -330,7 +331,7 @@ def test_migrations_preserve_scheduler_observations(tmp_path: Path, previous_rev
     path = tmp_path / "forecast-history.sqlite3"
     with closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT version_num FROM alembic_version").fetchone() == (
-            "0004_publication_slates",
+            "0005_publication_schedules",
         )
         assert db.execute("SELECT id FROM collection_refresh_requests").fetchall() == []
         assert db.execute(

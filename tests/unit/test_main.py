@@ -397,6 +397,19 @@ def test_healthcheck_pings_start_and_end_with_matching_rid(
 
 
 @respx.mock
+def test_forced_date_preview_explains_itself_in_healthchecks(monkeypatch, tmp_path):
+    monkeypatch.setenv("HEALTHCHECK_URL", "https://hc-ping.com/test-uuid")
+    respx.get(SCOREBOARD_URL).respond(json={"events": []})
+    respx.get("https://hc-ping.com/test-uuid/start").respond(200)
+    end = respx.post("https://hc-ping.com/test-uuid/0").respond(200)
+
+    preview_day = TARGET_DATE - dt.timedelta(days=1)
+    assert main(["--date", preview_day.isoformat()]) == EXIT_OK
+    assert b"forcing --dry-run" in end.calls.last.request.content
+    assert not (tmp_path / "state").exists()
+
+
+@respx.mock
 def test_no_healthcheck_url_means_no_pings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("HEALTHCHECK_URL", raising=False)
     respx.get(SCOREBOARD_URL).mock(return_value=httpx.Response(200, json={"events": []}))

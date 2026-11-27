@@ -4,10 +4,25 @@
     {% set waiting.active = true %}
   {% endif %}
 {% endfor %}
-{% if executions|selectattr('outcome', 'equalto', 'running')|list %}
+{% if (executions|selectattr('outcome', 'equalto', 'running')|list) or (publication_executions|selectattr('outcome', 'in', ('queued', 'running'))|list) %}
   {% set waiting.active = true %}
 {% endif %}
 <section id="run-status"{% if waiting.active %} hx-get="{{ url_for('task_status') }}" hx-trigger="every 5s" hx-swap="outerHTML"{% endif %}>
+  <h2 id="publication-executions">Publishing executions</h2>
+  {% if publication_executions %}
+    <ul class="record-list">
+      {% for execution in publication_executions %}
+        <li>
+          <strong>{{ execution.outcome|capitalize }}</strong>
+          <span>{{ sport_names[execution.sport] }} · {{ execution.game_day }} · {{ execution.trigger|capitalize }}{% if execution.trigger == 'manual' and execution.scheduled_for %} · Scheduled slot{% endif %}</span>
+          <span class="muted">{{ (execution.finished_at or execution.started_at or execution.requested_at)|timestamp(execution.sport) }}</span>
+          {% if execution.failure_summary %}<span>{{ execution.failure_summary }}</span>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No publishing executions have been recorded.</p>
+  {% endif %}
   <h2>Manual refreshes</h2>
   <div class="task-grid">
     {% for schedule in schedules %}

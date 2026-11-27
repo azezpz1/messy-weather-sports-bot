@@ -8,6 +8,7 @@ from typing import Literal
 
 from sqlalchemy import Connection, RowMapping
 
+from messy_weather_sports_bot import publication_store
 from messy_weather_sports_bot.collection import (
     forecast_db_transaction,
     insert_collection,
@@ -46,6 +47,7 @@ def _next_slot(slot: dt.datetime, seconds: int, now: dt.datetime) -> dt.datetime
 def initialize(now: dt.datetime) -> None:
     with forecast_db_transaction() as db:
         migrate_forecast_db(db)
+        publication_store.initialize(db)
         db.exec_driver_sql(
             """
             INSERT INTO collection_schedules (sport, interval_seconds, enabled, next_due)
@@ -122,6 +124,7 @@ def request_refresh(sport: str, now: dt.datetime) -> int:
 def recover(now: dt.datetime) -> None:
     """Mark abandoned executions after taking the exclusive collector lock."""
     with forecast_db_transaction() as db:
+        publication_store.recover(db, now)
         db.exec_driver_sql(
             """
             UPDATE collection_executions

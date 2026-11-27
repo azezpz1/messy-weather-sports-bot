@@ -334,4 +334,4 @@ def test_stored_partial_thread_only_resumes_with_a_matching_prefix(
     assert len(poster.posted) == 2
     assert set(prefixes) == {"CFB_"}
     state_dir = Path(os.environ["MESSY_WEATHER_STATE_DIR"])
-    assert sorted(path.name for path in state_dir.iterdir()) == [f"{day}.cfb.json"]
+    assert sorted(path.name for path in state_dir.glob("*.json")) == [f"{day}.cfb.json"]

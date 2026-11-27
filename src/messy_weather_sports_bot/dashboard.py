@@ -10,6 +10,7 @@ import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 from typing import cast
+from uuid import uuid4
 
 from flask import Flask, Response, abort, redirect, render_template, request, url_for
 from flask.typing import ResponseReturnValue
@@ -17,7 +18,7 @@ from flask_wtf.csrf import CSRFError, CSRFProtect
 from sqlalchemy.exc import SQLAlchemyError
 from waitress import serve
 
-from messy_weather_sports_bot import dashboard_read, scheduler_store
+from messy_weather_sports_bot import dashboard_read, publication_store, scheduler_store
 from messy_weather_sports_bot.collection import forecast_db_path
 from messy_weather_sports_bot.sports import SPORTS
 
@@ -58,6 +59,8 @@ TABLE_LABELS = {
     "collection_schedules": "Collection schedules",
     "collection_executions": "Collection executions",
     "collection_refresh_requests": "Refresh requests",
+    "publication_schedules": "Publishing schedules",
+    "publication_executions": "Publishing executions",
 }
 RELATED_COLUMNS = {
     "game_id": "games",
@@ -99,7 +102,7 @@ def _age(seconds: int) -> str:
 
 
 def _raw_row_url(table: str, row) -> str:
-    if table == "collection_schedules":
+    if table in {"collection_schedules", "publication_schedules"}:
         return url_for("raw_row", table=table, key=row["sport"])
     if table == "forecast_periods":
         return url_for("raw_row", table=table, key=row["observation_id"], index=row["period_index"])
@@ -126,6 +129,9 @@ def create_app(secret_key: str, *, trusted_host: str | None = None) -> Flask:
         table_labels=TABLE_LABELS,
         related_columns=RELATED_COLUMNS,
         raw_row_url=_raw_row_url,
+        weekdays=tuple(enumerate(publication_store.WEEKDAYS)),
+        request_ttl_minutes=publication_store.REQUEST_TTL_MINUTES,
+        sport_timezones={slug: sport.game_day_timezone.key for slug, sport in SPORTS.items()},
     )
 
     @app.after_request
@@ -205,19 +211,34 @@ def create_app(secret_key: str, *, trusted_host: str | None = None) -> Flask:
             abort(404)
         return render_template("game.html", sport=detail["game"]["sport"], **detail)
 
+    def task_data() -> dict[str, list[dashboard_read.Row]]:
+        with dashboard_read.read_database(forecast_db_path()) as db:
+            return {
+                "schedules": dashboard_read.task_status(db),
+                "executions": dashboard_read.recent_executions(db),
+                "publication_schedules": dashboard_read.publication_tasks(db),
+                "publication_executions": dashboard_read.recent_publications(db),
+            }
+
     def task_page(
         *, message: str | None = None, status: int = 200, editing: str | None = None
     ) -> tuple[str, int]:
-        with dashboard_read.read_database(forecast_db_path()) as db:
-            schedules = dashboard_read.task_status(db)
-            executions = dashboard_read.recent_executions(db)
+        now = dt.datetime.now(dt.UTC)
+        data = task_data()
+        for schedule in data["publication_schedules"]:
+            schedule["days"] = [
+                day
+                for day in range(len(publication_store.WEEKDAYS))
+                if schedule["weekdays"] & (1 << day)
+            ]
+            schedule["game_day"] = SPORTS[schedule["sport"]].game_day_for(now)
+            schedule["request_key"] = uuid4().hex
         return render_template(
             "tasks.html",
-            schedules=schedules,
-            executions=executions,
             message=message,
             max_hours=MAX_HOURS,
             editing=editing,
+            **data,
         ), status
 
     @app.get("/admin/tasks")
@@ -226,10 +247,7 @@ def create_app(secret_key: str, *, trusted_host: str | None = None) -> Flask:
 
     @app.get("/admin/tasks/status")
     def task_status() -> str:
-        with dashboard_read.read_database(forecast_db_path()) as db:
-            schedules = dashboard_read.task_status(db)
-            executions = dashboard_read.recent_executions(db)
-        return render_template("task_status.html", schedules=schedules, executions=executions)
+        return render_template("task_status.html", **task_data())
 
     @app.post("/admin/tasks/<sport>/schedule")
     def edit_schedule(sport: str) -> ResponseReturnValue:
@@ -266,6 +284,57 @@ def create_app(secret_key: str, *, trusted_host: str | None = None) -> Flask:
         _sport(sport)
         scheduler_store.request_refresh(sport, dt.datetime.now(dt.UTC))
         return redirect(url_for("tasks") + "#run-status", code=303)
+
+    @app.post("/admin/tasks/<slug>/publication-schedule")
+    def edit_publication_schedule(slug: str) -> ResponseReturnValue:
+        sport = SPORTS[_sport(slug)]
+        revision = request.form.get("revision", type=int)
+        enabled = request.form.get("enabled")
+        editing = f"{slug}-publication"
+        if revision is None or revision < 0 or enabled not in {"0", "1"}:
+            return task_page(
+                message="Reload the schedule and try again.", status=400, editing=editing
+            )
+        try:
+            days = tuple(int(value) for value in request.form.getlist("weekdays"))
+        except ValueError:
+            return task_page(message="Select valid weekdays.", status=400, editing=editing)
+        try:
+            publication_store.configure(
+                sport,
+                run_time=request.form.get("run_time", ""),
+                weekdays=days,
+                enabled=enabled == "1",
+                expected_revision=revision,
+            )
+        except publication_store.ScheduleConflict as exc:
+            return task_page(message=str(exc), status=409, editing=editing)
+        except ValueError as exc:
+            return task_page(message=str(exc), status=400, editing=editing)
+        return redirect(url_for("tasks") + f"#{editing}", code=303)
+
+    @app.post("/admin/tasks/<slug>/publish")
+    def publish(slug: str) -> ResponseReturnValue:
+        sport = SPORTS[_sport(slug)]
+        now = dt.datetime.now(dt.UTC)
+        game_day = sport.game_day_for(now)
+        editing = f"{slug}-publication"
+        if (
+            request.form.get("confirm") != "1"
+            or request.form.get("game_day") != game_day.isoformat()
+        ):
+            return task_page(
+                message="Confirm publishing for the current game day.",
+                status=400,
+                editing=editing,
+            )
+        try:
+            publication_store.request_publish(
+                sport, now, game_day, request.form.get("request_key", "")
+            )
+        except ValueError as exc:
+            return task_page(message=str(exc), status=400, editing=editing)
+        return redirect(url_for("tasks") + "#publication-executions", code=303)
 
     @app.get("/admin/data")
     def data() -> str:

@@ -1,0 +1,44 @@
+<h2>Publishing schedules</h2>
+<div class="task-grid">
+  {% for schedule in publication_schedules %}
+    {% set slug = schedule.sport %}
+    <section class="panel" id="{{ slug }}-publication">
+      <h3>{{ sport_names[slug] }}</h3>
+      <dl class="metadata">
+        <dt>Next run</dt><dd>{{ schedule.next_due|timestamp(slug) if schedule.enabled else 'Paused' }}</dd>
+      </dl>
+      {% if editing == slug ~ '-publication' %}<p class="notice" role="alert">{{ message }}</p>{% endif %}
+      <form class="schedule-form" method="post" action="{{ url_for('edit_publication_schedule', slug=slug) }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="revision" value="{{ schedule.revision }}">
+        <fieldset class="publication-days">
+          <legend>Run on</legend>
+          <div class="weekday-options">
+            {% for day, name in weekdays %}
+              <label class="check"><input type="checkbox" name="weekdays" value="{{ day }}"{% if day in schedule.days %} checked{% endif %}> {{ name }}</label>
+            {% endfor %}
+          </div>
+        </fieldset>
+        <label>Time ({{ sport_timezones[slug] }}) <input type="time" name="run_time" value="{{ schedule.run_time }}" required></label>
+        <label>Recurring schedule
+          <select name="enabled">
+            <option value="1"{% if schedule.enabled %} selected{% endif %}>Enabled</option>
+            <option value="0"{% if not schedule.enabled %} selected{% endif %}>Paused</option>
+          </select>
+        </label>
+        <button class="secondary" type="submit">Save publishing schedule</button>
+      </form>
+      <details class="publication-manual"{% if editing == slug ~ '-publication' %} open{% endif %}>
+        <summary>Publish this game day</summary>
+        <p class="muted">This can post to Bluesky even while the schedule is paused. It uses saved thread progress. Requests expire after {{ request_ttl_minutes }} minutes or at the end of the game day.</p>
+        <form method="post" action="{{ url_for('publish', slug=slug) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <input type="hidden" name="game_day" value="{{ schedule.game_day }}">
+          <input type="hidden" name="request_key" value="{{ schedule.request_key }}">
+          <label class="check"><input type="checkbox" name="confirm" value="1" required> Confirm {{ sport_names[slug] }} publishing for {{ schedule.game_day }}</label>
+          <button type="submit">Queue publishing</button>
+        </form>
+      </details>
+    </section>
+  {% endfor %}
+</div>
