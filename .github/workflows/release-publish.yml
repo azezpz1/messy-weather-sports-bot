@@ -6,14 +6,23 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  publish:
+  browser:
+    name: Test release candidate
     if: >-
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       startsWith(github.event.pull_request.head.ref, 'release/v')
+    uses: ./.github/workflows/dashboard-browser.yml
+    with:
+      ref: ${{ github.event.pull_request.merge_commit_sha }}
+
+  publish:
+    needs: browser
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -28,14 +37,17 @@ jobs:
         run: echo "version=$(uv version --short)" >> "$GITHUB_OUTPUT"
 
       - name: Tag release
+        env:
+          RELEASE_TAG: v${{ steps.version.outputs.version }}
         run: |
-          git tag "v${{ steps.version.outputs.version }}"
-          git push origin "v${{ steps.version.outputs.version }}"
+          git tag "$RELEASE_TAG"
+          git push origin "refs/tags/$RELEASE_TAG"
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: v${{ steps.version.outputs.version }}
         run: |
-          gh release create "v${{ steps.version.outputs.version }}" \
-            --title "v${{ steps.version.outputs.version }}" \
+          gh release create "$RELEASE_TAG" \
+            --title "$RELEASE_TAG" \
             --generate-notes

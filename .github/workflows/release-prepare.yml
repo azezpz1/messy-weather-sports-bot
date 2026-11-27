@@ -68,4 +68,4 @@ jobs:
             --base main \
             --head "$branch" \
             --title "chore: release v${version}" \
-            --body "Version bump for release v${version}. Merging this PR tags the merge commit and publishes the GitHub release."
+            --body "Version bump for release v${version}. After merge, the dashboard browser and Caddy tests must pass on the merge commit before it is tagged and published."

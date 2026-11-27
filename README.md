@@ -375,8 +375,14 @@ through uv. Use the [coordinated update procedure](#updating-to-the-latest-relea
 when the dashboard and collector share the checkout. Caddy updates through the
 OS package manager. The bundled htmx asset ships with a normal app release.
 
-The browser tests run in CI with Chromium and an iPhone-sized WebKit viewport.
-CI also verifies the documented Caddy configuration against Waitress over HTTPS.
+The dashboard CI job runs on pull requests that change the application
+package (including dashboard assets, shared database and scheduler code, and
+migrations), Python dependencies or version, E2E tests or shared pytest
+configuration, the dashboard CI or release publish workflow, the release
+updater, or this README, which supplies the Caddy example. The job tests
+Chromium, an iPhone-sized WebKit viewport, and the documented Caddy
+configuration against Waitress over HTTPS. The release workflow also runs the
+full suite on the merge commit before tagging.
 To reproduce these checks, install Caddy on your development machine, install
 the browser engines, and run the optional test group.
 
@@ -583,29 +589,30 @@ uv run pytest -m "not integration"  # unit tests only (no network)
 Integration tests hit the real ESPN and NWS APIs (no credentials needed) but
 never post to Bluesky — they use a console-printing poster instead. They're
 contract tests: they catch an upstream API change that the unit tests, which
-mock those APIs, can't. CI runs them on every push and pull request, in an
-`integration` job separate from the `test` job (lint, types, unit tests), so
-an upstream outage shows up as its own red check without failing `test`.
+mock those APIs, can't. CI runs them on every push to `main` and every pull
+request, in an `integration` job separate from the `test` job (lint, formatting,
+types, and the full unit suite). An upstream outage shows up as its own red
+check without failing `test`.
 Only `test` should be a required status check for merging.
 
 ### Releasing
 
 The "Release (prepare)" workflow (manually triggered) bumps the version,
-commits, and opens a `release/vX.Y.Z` pull request; merging that PR triggers
-"Release (publish)", which tags the merge commit and creates the GitHub
-release.
+commits, and opens a `release/vX.Y.Z` pull request. When a maintainer merges it,
+"Release (publish)" runs the full Chromium, WebKit, and Caddy suite
+against the merge commit. Once the suite passes, the workflow tags that same
+commit and creates the GitHub release. If the suite fails, publishing is skipped.
 
 **Known gap:** the release PR's CI run needs a manual approval. "Release
 (prepare)" opens the PR using the default `GITHUB_TOKEN`. GitHub puts the
-resulting `pull_request`-triggered CI run into an approval-required state — a user
+resulting `pull_request`-triggered CI run into an approval-required state. A user
 with write access has to click "Approve and run" in the PR's merge box
-before it (and the integration tests) actually execute. This is distinct
-from the separate approval gate for PRs from forks or first-time
-contributors. The prepare job runs lint, type checks, and unit tests
-*before* opening the PR as a partial substitute, but if the release PR is
-merged before anyone approves the run, it merges without CI ever having
-executed against it. Fixing this so CI runs automatically requires
-authenticating `gh pr create` with a GitHub App token or a fine-grained PAT
+before the PR checks execute. The publish workflow enforces the dashboard
+check even if PR CI is still awaiting approval when the maintainer merges.
+GitHub applies a separate approval gate to PRs from forks or first-time
+contributors. The prepare job runs lint, type checks, and unit tests before
+opening the PR. Starting PR CI automatically requires authenticating
+`gh pr create` with a GitHub App token or a fine-grained PAT
 (owned by a non-Actions identity) instead of `GITHUB_TOKEN`, which needs a
 repository secret to be provisioned by a maintainer.
 
