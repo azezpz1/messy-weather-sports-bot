@@ -70,30 +70,42 @@ jobs:
       - name: Integration tests (live APIs)
         run: uv run pytest -m integration --no-cov
 
-  browser:
-    name: Dashboard browser tests
+  dashboard-changes:
+    name: Check dashboard paths
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    outputs:
+      relevant: ${{ steps.paths.outputs.relevant }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          fetch-depth: 2
           persist-credentials: false
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
-        with:
-          enable-cache: true
-
-      - name: Install test dependencies
-        run: uv sync --locked --group e2e
-
-      - name: Install Caddy
+      # Compare the PR merge tree with its base parent. Git evaluates the entire
+      # diff, including deletions, without GitHub's 300-file path-filter limit.
+      - name: Detect dashboard changes
+        id: paths
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends caddy
+          if git diff --quiet HEAD^1 HEAD -- \
+            src/messy_weather_sports_bot/ tests/e2e/ tests/conftest.py conftest.py \
+            README.md .python-version pyproject.toml uv.lock \
+            scripts/update-to-latest-release.sh \
+            .github/workflows/ci.yml .github/workflows/dashboard-browser.yml \
+            .github/workflows/release-publish.yml; then
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          else
+            case $? in
+              1) echo "relevant=true" >> "$GITHUB_OUTPUT" ;;
+              *) exit 1 ;;
+            esac
+          fi
 
-      - name: Install Chromium and WebKit
-        run: uv run --locked --group e2e playwright install --with-deps chromium webkit
-
-      - name: Test the dashboard in browsers
-        run: uv run --locked --group e2e pytest --no-cov tests/e2e
+  browser:
+    name: Dashboard browser tests
+    needs: dashboard-changes
+    if: needs.dashboard-changes.outputs.relevant == 'true'
+    uses: ./.github/workflows/dashboard-browser.yml
+    with:
+      ref: ${{ github.sha }}
