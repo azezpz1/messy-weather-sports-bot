@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Updates the local checkout to the latest published GitHub release tag,
-# then re-syncs dependencies. Intended to be run from the repo root (e.g. as
-# the first line of the wrapper script your crontab invokes) so a scheduled
-# job always runs the latest release instead of tracking `main` directly.
+# then re-syncs dependencies and restarts the dashboard if it is running.
+# Intended to be run from the repo root so the deployment tracks releases.
 #
 # See the "Updating to the latest release" section of the README for
 # details on why this checks the latest *published release* rather than the
@@ -77,3 +76,8 @@ else
 fi
 
 uv sync
+
+if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet messy-weather-dashboard; then
+  echo "Restarting messy-weather-dashboard..."
+  sudo systemctl restart messy-weather-dashboard
+fi
