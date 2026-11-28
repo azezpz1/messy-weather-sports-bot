@@ -50,7 +50,7 @@
             </td>
             <td class="kickoff">
               {{ game.kickoff|timestamp(sport) }}
-              <div class="muted">{{ game.stadium_name or game.espn_venue_name or 'Venue pending' }}</div>
+              <div class="muted">{{ game.venue_label }}</div>
             </td>
             <td class="outlook">{{ evaluation(game) }}</td>
             <td class="game-score"><span class="mobile-label">Score </span>{{ score(game.score) }}</td>

@@ -31,6 +31,8 @@ class StadiumInfo:
     aliases: tuple[str, ...] = field(default_factory=tuple)
     """Past names ESPN may still report for this venue (e.g. a sponsor rename),
     so a schedule fetched before `name` here is updated still resolves correctly."""
+    city: str = ""
+    state: str = ""
 
 
 class VenueCatalog:

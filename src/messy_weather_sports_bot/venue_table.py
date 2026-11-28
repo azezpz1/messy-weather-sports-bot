@@ -36,7 +36,7 @@ class VenueRow:
     is_covered: bool
     city: str
     state: str
-    """Two-letter state code. `city` and `state` are review metadata, not used to match."""
+    """Two-letter state code. `city` and `state` are displayed on the dashboard."""
     precision: str
     source: str
     """Where the coordinates came from (`nfl_catalog`, `photon:W123`, `manual`), so a
@@ -51,6 +51,8 @@ class VenueRow:
             self.is_covered,
             venue_id=self.id,
             aliases=self.aliases,
+            city=self.city,
+            state=self.state,
         )
 
     def to_json(self) -> dict:
