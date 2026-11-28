@@ -568,7 +568,8 @@ cd /path/to/messy-weather-sports-bot
 
 This asks GitHub for the latest *published* release rather than just the
 newest tag, since a repo could in principle have tags that were never turned
-into a release, then checks out that tag and runs `uv sync`.
+into a release, then checks out that tag and runs `uv sync`. If the systemd
+dashboard service is running, the updater restarts it with `sudo` after syncing.
 
 Coordinate updates outside the publishing window. Stop the worker and
 dashboard, run the updater, then restart the worker so it can migrate the
