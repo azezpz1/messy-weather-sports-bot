@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="htmx-config" content='{"allowEval":false,"allowScriptTags":false,"includeIndicatorStyles":false,"historyCacheSize":0}'>
   <title>{% block title %}Messy Weather{% endblock %}</title>
+  <script>{% include '_appearance.js' %}</script>
   <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
   {% block scripts %}{% endblock %}
 </head>
@@ -18,6 +19,13 @@
         <a href="{{ url_for('tasks') }}"{% if request.endpoint in ('tasks', 'edit_schedule') %} aria-current="page"{% endif %}>Tasks</a>
         <a href="{{ url_for('data') }}"{% if request.endpoint in ('data', 'raw_table', 'raw_row') %} aria-current="page"{% endif %}>Data</a>
       </nav>
+      <label class="appearance">Appearance
+        <select id="appearance">
+          <option value="system">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
     </div>
   </header>
   <main class="shell">{% block content %}{% endblock %}</main>

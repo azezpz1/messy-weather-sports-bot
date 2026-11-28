@@ -7,7 +7,9 @@ import datetime as dt
 import logging
 import os
 import sqlite3
+from base64 import b64encode
 from collections.abc import Sequence
+from hashlib import sha256
 from pathlib import Path
 from typing import cast
 from uuid import uuid4
@@ -134,11 +136,16 @@ def create_app(secret_key: str, *, trusted_host: str | None = None) -> Flask:
         sport_timezones={slug: sport.game_day_timezone.key for slug, sport in SPORTS.items()},
     )
 
+    # Authorize the render-blocking inline script without allowing arbitrary inline scripts.
+    appearance_script = app.jinja_env.get_template("_appearance.js").render()
+    appearance_hash = b64encode(sha256(appearance_script.encode("utf-8")).digest()).decode("ascii")
+
     @app.after_request
     def security_headers(response: Response) -> Response:
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; object-src 'none'; base-uri 'none'; "
-            "frame-ancestors 'none'; form-action 'self'"
+            "frame-ancestors 'none'; form-action 'self'; "
+            f"script-src 'self' 'sha256-{appearance_hash}'"
         )
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "same-origin"

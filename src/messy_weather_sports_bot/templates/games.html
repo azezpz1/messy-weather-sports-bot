@@ -38,10 +38,10 @@
   {% endif %}
   {% if games %}
     <table class="game-list">
-      <thead><tr><th scope="col">Game</th><th scope="col">Kickoff and venue</th><th scope="col">Outlook</th><th scope="col">Score</th></tr></thead>
+      <thead><tr><th scope="col">Game</th><th scope="col">Kickoff and venue</th><th scope="col">Outlook</th><th scope="col" class="score-heading">Score</th></tr></thead>
       <tbody>
         {% for game in games %}
-          <tr>
+          <tr{% if game.is_messy %} class="messy-game"{% endif %}>
             <td class="matchup">
               <a href="{{ url_for('game', game_id=game.game_id, observation=game.id) }}">{{ game.away_team }} at {{ game.home_team }}</a>
               {% if game.forecast_age_seconds is not none %}
