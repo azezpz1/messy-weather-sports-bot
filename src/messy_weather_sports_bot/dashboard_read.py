@@ -162,6 +162,22 @@ def _weather_status(observation: Row) -> str:
     return "messy" if observation["is_messy"] else "pleasant"
 
 
+def _venue_label(observation: Row) -> str:
+    name = observation["stadium_name"] or observation["espn_venue_name"]
+    venue_id = observation["stadium_venue_id"] or observation["espn_venue_id"]
+    try:
+        catalog = SPORTS[observation["sport"]].venue_catalog()
+    except (OSError, ValueError):
+        # Saved forecasts remain browsable if the packaged venue data can't be loaded.
+        return name or "Venue pending"
+    stadium = catalog.for_venue(venue_id or "", name or "")
+    if stadium is None:
+        return name or "Venue pending"
+    location = ", ".join(part for part in (stadium.city, stadium.state) if part)
+    name = name or stadium.name
+    return f"{name} · {location}" if location else name
+
+
 def _forecast_summary(
     observation: Row, periods: list[Row], now: dt.datetime | None, interval: int
 ) -> Row:
@@ -170,6 +186,7 @@ def _forecast_summary(
         age = max(0, (now - dt.datetime.fromisoformat(observation["observed_at"])).total_seconds())
     return {
         **observation,
+        "venue_label": _venue_label(observation),
         "selected_forecast": next((period for period in periods if period["selected"]), None),
         "precipitation": _precipitation(periods),
         "weather_status": _weather_status(observation),

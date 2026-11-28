@@ -11,49 +11,107 @@ __all__ = ["NFL_CATALOG", "STADIUMS", "StadiumInfo", "stadium_for_team", "stadiu
 
 # Keyed by ESPN team abbreviation.
 STADIUMS: dict[str, StadiumInfo] = {
-    "ARI": StadiumInfo("State Farm Stadium", 33.5276, -112.2626, is_covered=True),
-    "ATL": StadiumInfo("Mercedes-Benz Stadium", 33.7554, -84.4008, is_covered=True),
-    "BAL": StadiumInfo("M&T Bank Stadium", 39.2780, -76.6227, is_covered=False),
+    "ARI": StadiumInfo(
+        "State Farm Stadium", 33.5276, -112.2626, is_covered=True, city="Glendale", state="AZ"
+    ),
+    "ATL": StadiumInfo(
+        "Mercedes-Benz Stadium", 33.7554, -84.4008, is_covered=True, city="Atlanta", state="GA"
+    ),
+    "BAL": StadiumInfo(
+        "M&T Bank Stadium", 39.2780, -76.6227, is_covered=False, city="Baltimore", state="MD"
+    ),
     # New Highmark Stadium (opened June 2026), across the street from the old site.
-    "BUF": StadiumInfo("Highmark Stadium", 42.77306, -78.79222, is_covered=False, venue_id="11938"),
-    "CAR": StadiumInfo("Bank of America Stadium", 35.2258, -80.8528, is_covered=False),
-    "CHI": StadiumInfo("Soldier Field", 41.8623, -87.6167, is_covered=False, venue_id="3933"),
+    "BUF": StadiumInfo(
+        "Highmark Stadium",
+        42.77306,
+        -78.79222,
+        is_covered=False,
+        city="Orchard Park",
+        state="NY",
+        venue_id="11938",
+    ),
+    "CAR": StadiumInfo(
+        "Bank of America Stadium", 35.2258, -80.8528, is_covered=False, city="Charlotte", state="NC"
+    ),
+    "CHI": StadiumInfo(
+        "Soldier Field",
+        41.8623,
+        -87.6167,
+        is_covered=False,
+        city="Chicago",
+        state="IL",
+        venue_id="3933",
+    ),
     "CIN": StadiumInfo(
-        "Paycor Stadium", 39.0955, -84.5160, is_covered=False, aliases=("Paul Brown Stadium",)
+        "Paycor Stadium",
+        39.0955,
+        -84.5160,
+        is_covered=False,
+        city="Cincinnati",
+        state="OH",
+        aliases=("Paul Brown Stadium",),
     ),
     "CLE": StadiumInfo(
         "Huntington Bank Field",
         41.5061,
         -81.6995,
         is_covered=False,
+        city="Cleveland",
+        state="OH",
         venue_id="3679",
         aliases=("FirstEnergy Stadium", "Cleveland Browns Stadium"),
     ),
-    "DAL": StadiumInfo("AT&T Stadium", 32.7473, -97.0945, is_covered=True),
+    "DAL": StadiumInfo(
+        "AT&T Stadium", 32.7473, -97.0945, is_covered=True, city="Arlington", state="TX"
+    ),
     "DEN": StadiumInfo(
         "Empower Field at Mile High",
         39.7439,
         -105.0201,
         is_covered=False,
+        city="Denver",
+        state="CO",
         venue_id="3937",
         aliases=("Sports Authority Field at Mile High", "INVESCO Field at Mile High"),
     ),
-    "DET": StadiumInfo("Ford Field", 42.3400, -83.0456, is_covered=True, venue_id="3727"),
-    "GB": StadiumInfo("Lambeau Field", 44.5013, -88.0622, is_covered=False),
+    "DET": StadiumInfo(
+        "Ford Field",
+        42.3400,
+        -83.0456,
+        is_covered=True,
+        city="Detroit",
+        state="MI",
+        venue_id="3727",
+    ),
+    "GB": StadiumInfo(
+        "Lambeau Field", 44.5013, -88.0622, is_covered=False, city="Green Bay", state="WI"
+    ),
     "HOU": StadiumInfo(
         "Reliant Stadium",
         29.6847,
         -95.4107,
         is_covered=True,
+        city="Houston",
+        state="TX",
         venue_id="3891",
         aliases=("NRG Stadium",),
     ),
-    "IND": StadiumInfo("Lucas Oil Stadium", 39.7601, -86.1639, is_covered=True, venue_id="3812"),
+    "IND": StadiumInfo(
+        "Lucas Oil Stadium",
+        39.7601,
+        -86.1639,
+        is_covered=True,
+        city="Indianapolis",
+        state="IN",
+        venue_id="3812",
+    ),
     "JAX": StadiumInfo(
         "EverBank Stadium",
         30.3239,
         -81.6373,
         is_covered=False,
+        city="Jacksonville",
+        state="FL",
         venue_id="3712",
         aliases=("TIAA Bank Field", "EverBank Field"),
     ),
@@ -62,47 +120,118 @@ STADIUMS: dict[str, StadiumInfo] = {
         39.0489,
         -94.4839,
         is_covered=False,
+        city="Kansas City",
+        state="MO",
         aliases=("Arrowhead Stadium",),
     ),
-    "LAC": StadiumInfo("SoFi Stadium", 33.9535, -118.3392, is_covered=True),
-    "LAR": StadiumInfo("SoFi Stadium", 33.9535, -118.3392, is_covered=True),
-    "LV": StadiumInfo("Allegiant Stadium", 36.0909, -115.1833, is_covered=True),
+    "LAC": StadiumInfo(
+        "SoFi Stadium", 33.9535, -118.3392, is_covered=True, city="Inglewood", state="CA"
+    ),
+    "LAR": StadiumInfo(
+        "SoFi Stadium", 33.9535, -118.3392, is_covered=True, city="Inglewood", state="CA"
+    ),
+    "LV": StadiumInfo(
+        "Allegiant Stadium", 36.0909, -115.1833, is_covered=True, city="Las Vegas", state="NV"
+    ),
     "MIA": StadiumInfo(
         "Hard Rock Stadium",
         25.9580,
         -80.2389,
         is_covered=False,
+        city="Miami Gardens",
+        state="FL",
         venue_id="3948",
         aliases=("Sun Life Stadium", "Joe Robbie Stadium"),
     ),
-    "MIN": StadiumInfo("U.S. Bank Stadium", 44.9737, -93.2577, is_covered=True),
-    "NE": StadiumInfo("Gillette Stadium", 42.0909, -71.2643, is_covered=False),
-    "NO": StadiumInfo("Caesars Superdome", 29.9511, -90.0812, is_covered=True, venue_id="3493"),
-    "NYG": StadiumInfo("MetLife Stadium", 40.8135, -74.0745, is_covered=False, venue_id="3839"),
+    "MIN": StadiumInfo(
+        "U.S. Bank Stadium", 44.9737, -93.2577, is_covered=True, city="Minneapolis", state="MN"
+    ),
+    "NE": StadiumInfo(
+        "Gillette Stadium", 42.0909, -71.2643, is_covered=False, city="Foxborough", state="MA"
+    ),
+    "NO": StadiumInfo(
+        "Caesars Superdome",
+        29.9511,
+        -90.0812,
+        is_covered=True,
+        city="New Orleans",
+        state="LA",
+        venue_id="3493",
+    ),
+    "NYG": StadiumInfo(
+        "MetLife Stadium",
+        40.8135,
+        -74.0745,
+        is_covered=False,
+        city="East Rutherford",
+        state="NJ",
+        venue_id="3839",
+    ),
     # Same physical venue as NYG - ESPN uses one venue id per building, not per team.
-    "NYJ": StadiumInfo("MetLife Stadium", 40.8135, -74.0745, is_covered=False, venue_id="3839"),
-    "PHI": StadiumInfo("Lincoln Financial Field", 39.9008, -75.1675, is_covered=False),
+    "NYJ": StadiumInfo(
+        "MetLife Stadium",
+        40.8135,
+        -74.0745,
+        is_covered=False,
+        city="East Rutherford",
+        state="NJ",
+        venue_id="3839",
+    ),
+    "PHI": StadiumInfo(
+        "Lincoln Financial Field",
+        39.9008,
+        -75.1675,
+        is_covered=False,
+        city="Philadelphia",
+        state="PA",
+    ),
     "PIT": StadiumInfo(
         "Acrisure Stadium",
         40.4468,
         -80.0158,
         is_covered=False,
+        city="Pittsburgh",
+        state="PA",
         venue_id="3752",
         aliases=("Heinz Field",),
     ),
-    "SEA": StadiumInfo("Lumen Field", 47.5952, -122.3316, is_covered=False),
-    "SF": StadiumInfo("Levi's Stadium", 37.4033, -121.9694, is_covered=False, venue_id="4738"),
+    "SEA": StadiumInfo(
+        "Lumen Field", 47.5952, -122.3316, is_covered=False, city="Seattle", state="WA"
+    ),
+    "SF": StadiumInfo(
+        "Levi's Stadium",
+        37.4033,
+        -121.9694,
+        is_covered=False,
+        city="Santa Clara",
+        state="CA",
+        venue_id="4738",
+    ),
     "TB": StadiumInfo(
-        "Raymond James Stadium", 27.9759, -82.5033, is_covered=False, venue_id="3886"
+        "Raymond James Stadium",
+        27.9759,
+        -82.5033,
+        is_covered=False,
+        city="Tampa",
+        state="FL",
+        venue_id="3886",
     ),
     "TEN": StadiumInfo(
-        "Nissan Stadium", 36.1665, -86.7713, is_covered=False, aliases=("LP Field",)
+        "Nissan Stadium",
+        36.1665,
+        -86.7713,
+        is_covered=False,
+        city="Nashville",
+        state="TN",
+        aliases=("LP Field",),
     ),
     "WSH": StadiumInfo(
         "Northwest Stadium",
         38.9076,
         -76.8645,
         is_covered=False,
+        city="Landover",
+        state="MD",
         venue_id="3719",
         aliases=("FedExField",),
     ),

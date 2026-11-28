@@ -4,7 +4,7 @@
 {% block content %}
   <a class="back" href="{{ url_for('games', sport=sport) }}">← {{ sport_names[sport] }} games</a>
   <h1>{{ observation.away_team }} at {{ observation.home_team }}</h1>
-  <p>{{ observation.kickoff|timestamp(sport) }} · {{ observation.stadium_name or observation.espn_venue_name or 'Venue pending' }}</p>
+  <p>{{ observation.kickoff|timestamp(sport) }} · {{ observation.venue_label }}</p>
   <section class="panel snapshot" aria-label="Selected outlook">
     <div>
       {{ evaluation(observation) }}

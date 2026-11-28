@@ -10,6 +10,7 @@ from messy_weather_sports_bot.dashboard import create_app
 from messy_weather_sports_bot.messiness import evaluate_game
 from messy_weather_sports_bot.nfl import NFL
 from messy_weather_sports_bot.schedule import Game
+from messy_weather_sports_bot.sports import SPORTS
 from messy_weather_sports_bot.venues import StadiumInfo
 from messy_weather_sports_bot.weather import WeatherReport
 
@@ -103,6 +104,46 @@ def test_game_history_labels_and_escapes_saved_weather(dashboard):
     assert b"Snow &lt;em&gt;outlook&lt;/em&gt;" in response.data
     assert b"Pleasant \xc2\xb7 Score " in response.data
     assert dashboard.get("/admin/data/forecast_periods/2?index=0").status_code == 200
+
+
+@pytest.mark.parametrize(
+    ("sport", "stadium", "venue_id", "venue_name", "label"),
+    [
+        (
+            "nfl",
+            StadiumInfo("MetLife Stadium", 40.8135, -74.0745, False),
+            "",
+            "",
+            "MetLife Stadium · East Rutherford, NJ",
+        ),
+        ("cfb", None, "3861", "Ohio Stadium", "Ohio Stadium · Columbus, OH"),
+        ("cfb", None, "unknown", "Unlisted Stadium", "Unlisted Stadium"),
+        ("nfl", None, "", "", "Venue pending"),
+    ],
+)
+def test_game_pages_show_saved_venue_with_known_location(
+    dashboard, sport, stadium, venue_id, venue_name, label
+):
+    now = dt.datetime.now(dt.UTC)
+    kickoff = now + dt.timedelta(hours=12)
+    match = Game("Home", "Away", kickoff, stadium, venue_id=venue_id, venue_name=venue_name)
+    execution = scheduler_store.claim_manual(sport, now)
+    scheduler_store.save_day(
+        execution,
+        CollectedDay(
+            SPORTS[sport].game_day_for(kickoff),
+            now,
+            "complete",
+            1,
+            (GameObservation(match, "skipped", observed_at=now),),
+        ),
+    )
+    scheduler_store.finish(execution, now, "complete")
+
+    for path in (f"/games/{sport}", "/game/1?observation=1"):
+        response = dashboard.get(path)
+        assert response.status_code == 200
+        assert label in response.get_data(as_text=True)
 
 
 def test_refresh_status_can_be_read_after_a_new_browser_session(dashboard):
